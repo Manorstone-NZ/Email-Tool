@@ -834,6 +834,9 @@ function applyRoute(route) {
     if (isVisible && node.dataset.view === 'logs' && dashboard) {
       dashboard.renderLogs();
     }
+    if (isVisible && node.dataset.view === 'settings' && dashboard) {
+      dashboard.loadSettings();
+    }
   });
   document.querySelectorAll('[data-route]').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.route === route);

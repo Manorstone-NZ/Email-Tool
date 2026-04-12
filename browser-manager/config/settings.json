@@ -1,0 +1,12 @@
+{
+  "emailProvider": "graph",
+  "graphClientId": "2bae0439-8941-4f9f-9d54-ea47f2697190",
+  "graphTenantId": "c5d43863-4552-43b6-9a85-20c8876c7639",
+  "minScore": 30,
+  "vipSenders": [
+    "ceo@",
+    "vp@"
+  ],
+  "GRAPH_CLIENT_ID": "2bae0439-8941-4f9f-9d54-ea47f2697190",
+  "GRAPH_TENANT_ID": "c5d43863-4552-43b6-9a85-20c8876c7639"
+}
