@@ -37,7 +37,16 @@ function writeEmailUiState(state) {
     return;
   }
 
-  const safeState = state && typeof state === 'object' ? state : {};
+  const raw = state && typeof state === 'object' ? state : {};
+  const safeState = {};
+  for (const id of Object.keys(raw)) {
+    const e = raw[id];
+    safeState[id] = {
+      pinned: Boolean(e.pinned),
+      done: Boolean(e.done),
+      updatedAt: e.updatedAt || new Date().toISOString()
+    };
+  }
   try {
     localStorage.setItem(constants.EMAIL_STATE_STORAGE_KEY, JSON.stringify(safeState));
   } catch (err) {
