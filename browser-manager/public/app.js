@@ -252,12 +252,27 @@ class DashboardClient {
   }
 
   renderTriage() {
-    const listEl = document.getElementById('triageList');
     const statusEl = document.getElementById('triageStatus');
-    if (!listEl) return;
+    const ingestedAt = new Date().toISOString();
+    const rawItems = Array.isArray(this.triageItems) ? this.triageItems : [];
+    const localState = typeof PortalState !== 'undefined' && PortalState.readEmailUiState
+      ? PortalState.readEmailUiState()
+      : {};
+    const mapped = typeof EmailHelpers !== 'undefined' && EmailHelpers.mapEmailItem
+      ? rawItems.map((item) => EmailHelpers.mapEmailItem(item, ingestedAt))
+      : rawItems;
+    const items = typeof PortalState !== 'undefined' && PortalState.mergeEmailUiState
+      ? PortalState.mergeEmailUiState(mapped, localState)
+      : mapped;
 
-    if (!this.triageItems.length) {
-      listEl.innerHTML = '';
+    if (typeof EmailHelpers !== 'undefined' && EmailHelpers.warnIfLargeEmailList) {
+      EmailHelpers.warnIfLargeEmailList(items);
+    }
+
+    this.updateEmailRailCounts(items);
+
+    if (!rawItems.length) {
+      this.renderEmailCards([]);
       if (statusEl) {
         statusEl.textContent = `Scanned ${this.triageMeta.extractedCount} emails. No actionable emails above ${this.triageMeta.minScore}%.`;
       }
@@ -265,37 +280,274 @@ class DashboardClient {
     }
 
     if (statusEl) {
-      statusEl.textContent = `Scanned ${this.triageMeta.extractedCount} emails. Found ${this.triageItems.length} actionable (threshold ${this.triageMeta.minScore}%).`;
+      statusEl.textContent = `Scanned ${this.triageMeta.extractedCount} emails. Found ${rawItems.length} actionable (threshold ${this.triageMeta.minScore}%).`;
     }
 
-    listEl.innerHTML = this.triageItems
-      .map((item) => {
-        const score = Number(item.score || 0);
-        let scoreClass = 'low-confidence';
-        if (score >= 70) {
-          scoreClass = 'high-confidence';
-        } else if (score >= 50) {
-          scoreClass = 'medium-confidence';
+    this.renderEmailCards(items);
+  }
+
+  updateEmailRailCounts(items) {
+    if (typeof EmailHelpers === 'undefined' || !EmailHelpers.countEmailBuckets) {
+      return;
+    }
+
+    const buckets = EmailHelpers.countEmailBuckets(items, { search: '' });
+    const countMap = {
+      'count-cat-needs-reply': buckets.categories['Needs Reply'] || 0,
+      'count-cat-waiting': buckets.categories['Waiting on Others'] || 0,
+      'count-cat-fyi': buckets.categories.FYI || 0,
+      'count-state-flagged': buckets.states.Flagged || 0,
+      'count-state-pinned': buckets.states.Pinned || 0,
+      'count-state-done': buckets.states.Done || 0,
+      'count-tag-approval': buckets.tags.Approval || 0,
+      'count-tag-vendor': buckets.tags.Vendor || 0,
+      'count-tag-urgent': buckets.tags.Urgent || 0,
+    };
+
+    Object.entries(countMap).forEach(([id, value]) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.textContent = value ? `(${value})` : '';
+      }
+    });
+  }
+
+  renderEmailCards(items) {
+    const listEl = document.getElementById('triageList');
+    const emptyStateEl = document.getElementById('emailEmptyState');
+    if (!listEl) return;
+
+    const safeItems = Array.isArray(items) ? items : [];
+    const visibleItems = safeItems.filter((item) => !(item && item.uiState && item.uiState.done));
+
+    listEl.innerHTML = '';
+
+    if (!visibleItems.length) {
+      if (emptyStateEl) {
+        emptyStateEl.hidden = false;
+      }
+      return;
+    }
+
+    if (emptyStateEl) {
+      emptyStateEl.hidden = true;
+    }
+
+    visibleItems.forEach((item) => {
+      const itemId = String(item && item.id ? item.id : '');
+      const sender = String((item && item.sender) || 'Unknown sender');
+      const subject = String((item && item.subject) || 'No subject');
+      const recommendedAction = String((item && item.recommendedAction) || 'Review');
+      const preview = String((item && item.preview) || (item && item.body) || 'No preview available.');
+      const category = String((item && item.primaryCategory) || 'FYI');
+      const tags = Array.isArray(item && item.tags) ? item.tags : [];
+      const visibleTags = tags.slice(0, 2);
+      const overflowTagCount = Math.max(tags.length - visibleTags.length, 0);
+      const scoreText = String((item && item.scoreMeta && item.scoreMeta.confidenceText) || item.confidence || `${Math.round(Number(item && item.score ? item.score : 0))}%`);
+      const timestampMeta = typeof EmailHelpers !== 'undefined' && EmailHelpers.resolveDisplayTimestamp
+        ? EmailHelpers.resolveDisplayTimestamp(item)
+        : { value: item && item.timestamp ? item.timestamp : item && item.ingestedAt };
+      const isoTimestamp = String((timestampMeta && timestampMeta.value) || '');
+      const openUrl = item && item.openUrl;
+      const safeOpenUrl = openUrl && isSafeUrl(openUrl) ? openUrl : '';
+      const initial = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
+      const reasonText = String((item && item.reason) || 'No explicit reason provided.');
+      const matchedSignals = Array.isArray(item && item.matchedSignals)
+        ? item.matchedSignals
+        : (Array.isArray(item && item.signals) ? item.signals : []);
+
+      const cardEl = document.createElement('div');
+      cardEl.className = 'email-card';
+      cardEl.dataset.id = itemId;
+      cardEl.dataset.expanded = 'false';
+
+      const collapsedEl = document.createElement('div');
+      collapsedEl.className = 'card-collapsed';
+
+      const avatarEl = document.createElement('div');
+      avatarEl.className = 'card-avatar';
+      avatarEl.textContent = initial;
+
+      const contentEl = document.createElement('div');
+      contentEl.className = 'card-content';
+
+      const subjectRowEl = document.createElement('div');
+      subjectRowEl.className = 'card-subject-row';
+
+      const subjectEl = document.createElement('span');
+      subjectEl.className = 'card-subject';
+      subjectEl.textContent = subject;
+
+      const actionBadgeEl = document.createElement('span');
+      actionBadgeEl.className = 'card-action-badge';
+      actionBadgeEl.textContent = recommendedAction;
+
+      subjectRowEl.append(subjectEl, actionBadgeEl);
+
+      const metaRowEl = document.createElement('div');
+      metaRowEl.className = 'card-meta-row';
+
+      const senderEl = document.createElement('span');
+      senderEl.className = 'card-sender';
+      senderEl.textContent = sender;
+
+      const timestampEl = document.createElement('span');
+      timestampEl.className = 'card-timestamp';
+      timestampEl.textContent = relativeTime(isoTimestamp);
+      timestampEl.title = isoTimestamp;
+
+      const confidenceEl = document.createElement('span');
+      confidenceEl.className = 'card-confidence';
+      confidenceEl.textContent = scoreText;
+
+      metaRowEl.append(senderEl, timestampEl, confidenceEl);
+
+      const previewEl = document.createElement('div');
+      previewEl.className = 'card-preview';
+      previewEl.textContent = preview;
+
+      const pillsEl = document.createElement('div');
+      pillsEl.className = 'card-pills';
+
+      const categoryPillEl = document.createElement('span');
+      categoryPillEl.className = 'pill category-pill';
+      categoryPillEl.textContent = category;
+      pillsEl.appendChild(categoryPillEl);
+
+      visibleTags.forEach((tag) => {
+        const tagPillEl = document.createElement('span');
+        tagPillEl.className = 'pill tag-pill';
+        tagPillEl.textContent = String(tag);
+        pillsEl.appendChild(tagPillEl);
+      });
+
+      if (overflowTagCount > 0) {
+        const overflowPillEl = document.createElement('span');
+        overflowPillEl.className = 'pill tag-pill';
+        overflowPillEl.textContent = `+${overflowTagCount} more`;
+        pillsEl.appendChild(overflowPillEl);
+      }
+
+      contentEl.append(subjectRowEl, metaRowEl, previewEl, pillsEl);
+      collapsedEl.append(avatarEl, contentEl);
+
+      const actionsEl = document.createElement('div');
+      actionsEl.className = 'card-actions';
+
+      const openEl = document.createElement('a');
+      openEl.className = 'btn-card-action';
+      openEl.textContent = 'Open';
+      openEl.target = '_blank';
+      openEl.rel = 'noopener noreferrer';
+      openEl.href = safeOpenUrl || '#';
+      if (!safeOpenUrl) {
+        openEl.classList.add('is-disabled');
+        openEl.setAttribute('aria-disabled', 'true');
+      }
+
+      const pinEl = document.createElement('button');
+      pinEl.type = 'button';
+      pinEl.className = 'btn-card-action';
+      pinEl.dataset.action = 'pin';
+      pinEl.textContent = 'Pin';
+      if (item && item.uiState && item.uiState.pinned) {
+        pinEl.classList.add('is-active');
+      }
+
+      const doneEl = document.createElement('button');
+      doneEl.type = 'button';
+      doneEl.className = 'btn-card-action';
+      doneEl.dataset.action = 'done';
+      doneEl.textContent = 'Done';
+
+      actionsEl.append(openEl, pinEl, doneEl);
+
+      const expandedEl = document.createElement('div');
+      expandedEl.className = 'card-expanded';
+      expandedEl.hidden = true;
+
+      const bodyPreviewEl = document.createElement('div');
+      bodyPreviewEl.className = 'card-body-preview';
+      bodyPreviewEl.textContent = String((item && item.body) || preview);
+
+      const reasonEl = document.createElement('div');
+      reasonEl.className = 'card-reason';
+      const reasonLabelEl = document.createElement('strong');
+      reasonLabelEl.textContent = 'Reason:';
+      reasonEl.append(reasonLabelEl, document.createTextNode(` ${reasonText}`));
+
+      const signalsEl = document.createElement('div');
+      signalsEl.className = 'card-signals';
+      const signalsLabelEl = document.createElement('strong');
+      signalsLabelEl.textContent = 'Matched signals:';
+      signalsEl.append(signalsLabelEl, document.createTextNode(` ${matchedSignals.length ? matchedSignals.join(', ') : 'None'}`));
+
+      const rawEl = document.createElement('details');
+      rawEl.className = 'card-raw';
+
+      const rawSummaryEl = document.createElement('summary');
+      rawSummaryEl.textContent = 'Raw metadata';
+
+      const rawContentEl = document.createElement('pre');
+      rawContentEl.className = 'card-raw-content';
+      rawContentEl.textContent = JSON.stringify(item, null, 2);
+
+      rawEl.append(rawSummaryEl, rawContentEl);
+      expandedEl.append(bodyPreviewEl, reasonEl, signalsEl, rawEl);
+
+      collapsedEl.addEventListener('click', () => {
+        const isExpanded = cardEl.dataset.expanded === 'true';
+        cardEl.dataset.expanded = isExpanded ? 'false' : 'true';
+        expandedEl.hidden = isExpanded;
+      });
+
+      openEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!safeOpenUrl) {
+          event.preventDefault();
+        }
+      });
+
+      pinEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+
+        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+          return;
         }
 
-          const subject = this.escapeHtml(item.subject || 'No subject');
-          const linkedSubject = item.openUrl && isSafeUrl(item.openUrl)
-            ? `<a class="triage-link" target="_blank" rel="noopener noreferrer" href="${this.escapeHtml(item.openUrl)}">${subject}</a>`
-            : subject;
+        const state = PortalState.readEmailUiState();
+        const current = state[itemId] || {};
+        state[itemId] = {
+          ...current,
+          pinned: !Boolean(current.pinned),
+          done: Boolean(current.done),
+        };
 
-          return `
-          <div class="triage-item ${scoreClass}">
-            <div class="triage-sender">${this.escapeHtml(item.sender || 'Unknown sender')}</div>
-              <div class="triage-subject">${linkedSubject}</div>
-            <div class="triage-meta">
-              <span class="triage-confidence">${this.escapeHtml(item.confidence || `${score}%`)}</span>
-              <span class="triage-action">${this.escapeHtml(item.action || 'Review')}</span>
-            </div>
-            <div class="triage-reason">${this.escapeHtml(item.reason || 'No explicit reason')}</div>
-          </div>
-        `;
-      })
-      .join('');
+        PortalState.writeEmailUiState(state);
+        this.renderTriage();
+      });
+
+      doneEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+
+        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+          return;
+        }
+
+        const state = PortalState.readEmailUiState();
+        const current = state[itemId] || {};
+        state[itemId] = {
+          ...current,
+          done: true,
+        };
+
+        PortalState.writeEmailUiState(state);
+        this.renderTriage();
+      });
+
+      cardEl.append(collapsedEl, actionsEl, expandedEl);
+      listEl.appendChild(cardEl);
+    });
   }
 
   escapeHtml(text) {
@@ -315,6 +567,31 @@ function isSafeUrl(url) {
     const u = new URL(url);
     return u.protocol === 'https:' || u.protocol === 'http:';
   } catch { return false; }
+}
+
+function relativeTime(isoString) {
+  const timestamp = Date.parse(isoString);
+  if (!Number.isFinite(timestamp)) {
+    return 'now';
+  }
+
+  const diffMs = Date.now() - timestamp;
+  if (diffMs <= 0) {
+    return 'now';
+  }
+
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 60) {
+    return `${Math.max(minutes, 1)}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 // ── Route helpers ──────────────────────────────────────────────────────────

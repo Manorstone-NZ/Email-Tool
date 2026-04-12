@@ -15,14 +15,44 @@
 
     <main class="portal-main">
         <section id="view-email" data-view="email">
-            <section id="email-triage-section" class="triage-section">
-                <div class="triage-header">
-                    <h2>Email Triage</h2>
-                    <button id="triageRefreshBtn" class="btn btn-primary">Refresh Triage</button>
+            <aside class="email-rail">
+                <div class="rail-section">
+                    <h3 class="rail-heading">Categories</h3>
+                    <ul class="rail-list" id="categoryList">
+                        <li><button type="button" class="rail-filter is-active" data-category="">All</button></li>
+                        <li><button type="button" class="rail-filter" data-category="Needs Reply">Needs Reply <span class="rail-count" id="count-cat-needs-reply"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-category="Waiting on Others">Waiting on Others <span class="rail-count" id="count-cat-waiting"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-category="FYI">FYI <span class="rail-count" id="count-cat-fyi"></span></button></li>
+                    </ul>
                 </div>
-                <div id="triageStatus" class="triage-status">Click "Refresh Triage" to scan inbox for actionable emails.</div>
-                <div id="triageList" class="triage-list"></div>
-            </section>
+                <div class="rail-section">
+                    <h3 class="rail-heading">State</h3>
+                    <ul class="rail-list" id="stateList">
+                        <li><button type="button" class="rail-filter is-active" data-state="">All</button></li>
+                        <li><button type="button" class="rail-filter" data-state="Flagged">Flagged <span class="rail-count" id="count-state-flagged"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-state="Pinned">Pinned <span class="rail-count" id="count-state-pinned"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-state="Done">Done <span class="rail-count" id="count-state-done"></span></button></li>
+                    </ul>
+                </div>
+                <div class="rail-section">
+                    <h3 class="rail-heading">Tags</h3>
+                    <ul class="rail-list" id="tagList">
+                        <li><button type="button" class="rail-filter" data-tag="Approval">Approval <span class="rail-count" id="count-tag-approval"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-tag="Vendor">Vendor <span class="rail-count" id="count-tag-vendor"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-tag="Urgent">Urgent <span class="rail-count" id="count-tag-urgent"></span></button></li>
+                    </ul>
+                </div>
+            </aside>
+
+            <div class="email-main">
+                <div class="email-toolbar">
+                    <input type="search" id="emailSearch" placeholder="Search emails..." class="email-search-input">
+                    <button type="button" id="triageRefreshBtn" class="btn btn-primary">Refresh</button>
+                </div>
+                <p id="triageStatus" class="triage-status"></p>
+                <div id="triageList" class="email-list"></div>
+                <div id="emailEmptyState" class="empty-state" hidden>No emails found.</div>
+            </div>
         </section>
 
         <section id="view-logs" data-view="logs" hidden>
@@ -87,6 +117,10 @@
         </section>
     </main>
 
+    <script src="portal-constants.js"></script>
+    <script src="portal-state.js"></script>
+    <script src="email-helpers.js"></script>
+    <script src="log-helpers.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

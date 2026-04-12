@@ -312,21 +312,97 @@ header h1 {
     overflow-y: auto;
 }
 
-.triage-section {
-    margin-top: 24px;
-    border-top: 1px solid #e5e5e5;
-    padding-top: 20px;
+/* ── Email view ── */
+#view-email {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
 }
 
-.triage-header {
+.email-rail {
+    background: #ffffff;
+    border-radius: 10px;
+    border: 1px solid #e2e6ec;
+    box-shadow: 0 1px 3px rgba(30, 35, 48, 0.08);
+    padding: 14px;
+    position: sticky;
+    top: 20px;
+}
+
+.rail-section + .rail-section {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #edf1f6;
+}
+
+.rail-heading {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #5f6675;
+    margin-bottom: 8px;
+}
+
+.rail-list {
+    list-style: none;
+    display: grid;
+    gap: 6px;
+}
+
+.rail-filter {
+    width: 100%;
+    border: 1px solid transparent;
+    background: #f6f8fb;
+    color: #2e3442;
+    border-radius: 999px;
+    font-size: 13px;
+    text-align: left;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.rail-filter:hover {
+    background: #edf2f8;
+}
+
+.rail-filter.is-active {
+    border-color: #cdd8e6;
+    background: #e7f0fb;
+    color: #18344f;
+    font-weight: 600;
+}
+
+.rail-count {
+    color: #6a7384;
+    font-size: 12px;
+}
+
+.email-main {
+    min-width: 0;
+}
+
+.email-toolbar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    margin-bottom: 10px;
 }
 
-.triage-header h2 {
-    margin-bottom: 0;
+.email-search-input {
+    flex: 1;
+    border: 1px solid #ccd6e2;
+    border-radius: 999px;
+    padding: 10px 14px;
+    font-size: 14px;
+    background: #fff;
+}
+
+.email-search-input:focus {
+    outline: none;
+    border-color: #5f91c4;
+    box-shadow: 0 0 0 3px rgba(95, 145, 196, 0.2);
 }
 
 .triage-status {
@@ -338,74 +414,197 @@ header h1 {
     font-size: 13px;
 }
 
-.triage-list {
+.email-list {
     margin-top: 12px;
+    display: grid;
+    gap: 10px;
 }
 
-.triage-item {
-    padding: 12px;
-    margin-bottom: 10px;
-    border-left: 4px solid #8b8f9a;
-    background: #f9fafb;
-    border-radius: 4px;
+.email-card {
+    background: #ffffff;
+    border: 1px solid #dfe5ec;
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(24, 36, 62, 0.08);
+    overflow: hidden;
 }
 
-.triage-item.high-confidence {
-    border-left-color: #c0392b;
+.email-card[data-expanded='true'] {
+    border-color: #b9ccdf;
+    box-shadow: 0 2px 8px rgba(24, 36, 62, 0.12);
 }
 
-.triage-item.medium-confidence {
-    border-left-color: #d68910;
+.card-collapsed {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
 }
 
-.triage-item.low-confidence {
-    border-left-color: #8b8f9a;
+.card-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #dbe8f5;
+    color: #204263;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
 }
 
-.triage-sender {
+.card-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.card-subject-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.card-subject {
+    font-size: 16px;
+    color: #1f2633;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-action-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: #0f3558;
+    background: #d9ecff;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
+.card-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6d7484;
+}
+
+.card-sender {
     font-weight: 600;
     color: #2f3440;
 }
 
-.triage-subject {
-    margin-top: 4px;
-    color: #232730;
+.card-confidence {
+    font-weight: 600;
+    color: #1f5f44;
 }
 
-.triage-link {
-    color: #1f4e8c;
-    text-decoration: underline;
+.card-preview {
+    margin-top: 8px;
+    color: #495062;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.triage-link:hover {
-    color: #173a68;
-}
-
-.triage-meta {
+.card-pills {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.pill {
+    display: inline-flex;
     align-items: center;
-    margin-top: 8px;
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 3px 8px;
 }
 
-.triage-confidence {
-    background: #1f4e8c;
-    color: white;
-    padding: 2px 8px;
-    border-radius: 10px;
+.category-pill {
+    background: #e7f0fb;
+    color: #173d61;
+}
+
+.tag-pill {
+    background: #f2f4f7;
+    color: #4a5363;
+}
+
+.card-actions {
+    display: flex;
+    gap: 8px;
+    border-top: 1px solid #edf1f5;
+    padding: 8px 14px;
+}
+
+.btn-card-action {
+    border: 1px solid #d0d8e2;
+    background: #fff;
+    color: #344154;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 5px 10px;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.btn-card-action:hover {
+    background: #f4f8fd;
+}
+
+.btn-card-action.is-active {
+    background: #e9f5ee;
+    border-color: #b8d8c3;
+    color: #1f5f44;
+}
+
+.btn-card-action.is-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.card-expanded {
+    border-top: 1px solid #edf1f5;
+    background: #fafcff;
+    padding: 12px 14px;
+    color: #384457;
+    font-size: 13px;
+}
+
+.card-body-preview,
+.card-reason,
+.card-signals {
+    margin-bottom: 10px;
+}
+
+.card-body-preview {
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.card-raw summary {
+    cursor: pointer;
     font-weight: 600;
 }
 
-.triage-action {
-    font-weight: 600;
-    color: #2d7a46;
-}
-
-.triage-reason {
+.card-raw-content {
     margin-top: 8px;
-    color: #565a63;
-    font-size: 12px;
+    padding: 10px;
+    background: #f1f4f8;
+    border-radius: 8px;
+    border: 1px solid #dce3eb;
+    font-size: 11px;
+    max-height: 220px;
+    overflow: auto;
 }
 
 .empty-state {
@@ -483,5 +682,23 @@ header h1 {
 @media (max-width: 768px) {
     .dashboard {
         grid-template-columns: 1fr;
+    }
+
+    #view-email {
+        grid-template-columns: 1fr;
+    }
+
+    .email-rail {
+        position: static;
+    }
+
+    .email-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .card-subject-row {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
