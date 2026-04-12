@@ -51,3 +51,11 @@ test('warnIfLargeEmailList warns when item count exceeds 500', () => {
   warnIfLargeEmailList(new Array(501).fill({}), warn);
   expect(warn).toHaveBeenCalled();
 });
+
+test('countEmailBuckets computes counts after search scope', () => {
+  const items = [
+    { sender: 'Vendor', subject: 'Quote', preview: 'Approval needed', primaryCategory: 'Needs Reply', tags: ['Vendor', 'Approval'], uiState: { flagged: false, pinned: false, done: false } },
+  ];
+  const counts = countEmailBuckets(items, { search: 'quote' });
+  expect(counts.categories['Needs Reply']).toBe(1);
+});

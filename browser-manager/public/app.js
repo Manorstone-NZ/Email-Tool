@@ -7,6 +7,12 @@ class DashboardClient {
     this.isConnected = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    this.emailFilters = {
+      search: '',
+      category: null,  // null means 'All', or one of 'Needs Reply', 'Waiting on Others', 'FYI'
+      state: null,     // null means 'All', or one of 'Flagged', 'Pinned', 'Done'
+      tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
+    };
   }
 
   connect() {
@@ -261,18 +267,26 @@ class DashboardClient {
     const mapped = typeof EmailHelpers !== 'undefined' && EmailHelpers.mapEmailItem
       ? rawItems.map((item) => EmailHelpers.mapEmailItem(item, ingestedAt))
       : rawItems;
-    const items = typeof PortalState !== 'undefined' && PortalState.mergeEmailUiState
+    const merged = typeof PortalState !== 'undefined' && PortalState.mergeEmailUiState
       ? PortalState.mergeEmailUiState(mapped, localState)
       : mapped;
 
+    // Apply text search, category, state, tag filters
+    const filtered = typeof EmailHelpers !== 'undefined' && EmailHelpers.filterEmailItems
+      ? EmailHelpers.filterEmailItems(merged, this.emailFilters)
+      : merged;
+
     if (typeof EmailHelpers !== 'undefined' && EmailHelpers.warnIfLargeEmailList) {
-      EmailHelpers.warnIfLargeEmailList(items);
+      EmailHelpers.warnIfLargeEmailList(filtered);
     }
 
-    this.updateEmailRailCounts(items);
+    // Compute counts for left rail (after search, before active filter narrowing)
+    this.updateRailCounts(merged);
+    
+    this.renderEmailCards(filtered);
+    this.updateFilterActiveStates();
 
     if (!rawItems.length) {
-      this.renderEmailCards([]);
       if (statusEl) {
         statusEl.textContent = `Scanned ${this.triageMeta.extractedCount} emails. No actionable emails above ${this.triageMeta.minScore}%.`;
       }
@@ -282,33 +296,45 @@ class DashboardClient {
     if (statusEl) {
       statusEl.textContent = `Scanned ${this.triageMeta.extractedCount} emails. Found ${rawItems.length} actionable (threshold ${this.triageMeta.minScore}%).`;
     }
-
-    this.renderEmailCards(items);
   }
 
-  updateEmailRailCounts(items) {
+  updateRailCounts(items) {
     if (typeof EmailHelpers === 'undefined' || !EmailHelpers.countEmailBuckets) {
       return;
     }
 
-    const buckets = EmailHelpers.countEmailBuckets(items, { search: '' });
+    const counts = EmailHelpers.countEmailBuckets(items, { search: this.emailFilters.search });
     const countMap = {
-      'count-cat-needs-reply': buckets.categories['Needs Reply'] || 0,
-      'count-cat-waiting': buckets.categories['Waiting on Others'] || 0,
-      'count-cat-fyi': buckets.categories.FYI || 0,
-      'count-state-flagged': buckets.states.Flagged || 0,
-      'count-state-pinned': buckets.states.Pinned || 0,
-      'count-state-done': buckets.states.Done || 0,
-      'count-tag-approval': buckets.tags.Approval || 0,
-      'count-tag-vendor': buckets.tags.Vendor || 0,
-      'count-tag-urgent': buckets.tags.Urgent || 0,
+      'count-cat-needs-reply': counts.categories['Needs Reply'] || 0,
+      'count-cat-waiting': counts.categories['Waiting on Others'] || 0,
+      'count-cat-fyi': counts.categories.FYI || 0,
+      'count-state-flagged': counts.states.Flagged || 0,
+      'count-state-pinned': counts.states.Pinned || 0,
+      'count-state-done': counts.states.Done || 0,
+      'count-tag-approval': counts.tags.Approval || 0,
+      'count-tag-vendor': counts.tags.Vendor || 0,
+      'count-tag-urgent': counts.tags.Urgent || 0,
     };
 
     Object.entries(countMap).forEach(([id, value]) => {
       const el = document.getElementById(id);
       if (el) {
-        el.textContent = value ? `(${value})` : '';
+        el.textContent = value > 0 ? `(${value})` : '';
       }
+    });
+  }
+
+  updateFilterActiveStates() {
+    document.querySelectorAll('[data-category]').forEach((btn) => {
+      btn.classList.toggle('is-active', (btn.dataset.category || null) === this.emailFilters.category);
+    });
+
+    document.querySelectorAll('[data-state]').forEach((btn) => {
+      btn.classList.toggle('is-active', (btn.dataset.state || null) === this.emailFilters.state);
+    });
+
+    document.querySelectorAll('[data-tag]').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.tag === this.emailFilters.tag);
     });
   }
 
@@ -318,12 +344,17 @@ class DashboardClient {
     if (!listEl) return;
 
     const safeItems = Array.isArray(items) ? items : [];
-    const visibleItems = safeItems.filter((item) => !(item && item.uiState && item.uiState.done));
 
     listEl.innerHTML = '';
 
-    if (!visibleItems.length) {
+    if (!safeItems.length) {
       if (emptyStateEl) {
+        // Determine which empty state to show
+        if (this.emailFilters.search || this.emailFilters.category || this.emailFilters.state || this.emailFilters.tag) {
+          emptyStateEl.textContent = 'No results match current filters.';
+        } else {
+          emptyStateEl.textContent = 'No emails found.';
+        }
         emptyStateEl.hidden = false;
       }
       return;
@@ -333,7 +364,7 @@ class DashboardClient {
       emptyStateEl.hidden = true;
     }
 
-    visibleItems.forEach((item) => {
+    safeItems.forEach((item) => {
       const itemId = String(item && item.id ? item.id : '');
       const sender = String((item && item.sender) || 'Unknown sender');
       const subject = String((item && item.subject) || 'No subject');
@@ -642,6 +673,36 @@ document.addEventListener('DOMContentLoaded', () => {
   if (triageBtn) {
     triageBtn.addEventListener('click', () => {
       dashboard.refreshTriage();
+    });
+  }
+
+  // ── Email filter handlers ──────────────────────────────────────────────────
+  document.querySelectorAll('[data-category]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dashboard.emailFilters.category = btn.dataset.category || null;
+      dashboard.renderTriage();
+    });
+  });
+
+  document.querySelectorAll('[data-state]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dashboard.emailFilters.state = btn.dataset.state || null;
+      dashboard.renderTriage();
+    });
+  });
+
+  document.querySelectorAll('[data-tag]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dashboard.emailFilters.tag = btn.dataset.tag || null;
+      dashboard.renderTriage();
+    });
+  });
+
+  const emailSearch = document.getElementById('emailSearch');
+  if (emailSearch) {
+    emailSearch.addEventListener('input', (e) => {
+      dashboard.emailFilters.search = e.target.value;
+      dashboard.renderTriage();
     });
   }
 
