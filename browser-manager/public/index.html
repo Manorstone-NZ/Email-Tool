@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Manager Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="portal-nav">
+        <button data-route="email" class="portal-nav-link is-active">Email</button>
+        <button data-route="logs" class="portal-nav-link">Logs</button>
+        <button data-route="settings" class="portal-nav-link">Settings</button>
+    </nav>
+
+    <main class="portal-main">
+        <section id="view-email" data-view="email">
+            <section id="email-triage-section" class="triage-section">
+                <div class="triage-header">
+                    <h2>Email Triage</h2>
+                    <button id="triageRefreshBtn" class="btn btn-primary">Refresh Triage</button>
+                </div>
+                <div id="triageStatus" class="triage-status">Click "Refresh Triage" to scan inbox for actionable emails.</div>
+                <div id="triageList" class="triage-list"></div>
+            </section>
+        </section>
+
+        <section id="view-logs" data-view="logs" hidden>
+            <div class="controls">
+                <div class="status">
+                    <span>Status:</span>
+                    <span id="connectionStatus" class="status-indicator disconnected">Disconnected</span>
+                </div>
+                <button id="clearEventsBtn" class="btn btn-danger">Clear Events</button>
+            </div>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total Events:</span>
+                    <span id="totalEvents" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Automation Events:</span>
+                    <span id="automationCount" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">User Events:</span>
+                    <span id="userCount" class="stat-value">0</span>
+                </div>
+            </div>
+            <h2>Events Feed</h2>
+            <div id="eventsList" class="events-list">
+                <div class="empty-state">No events yet. Waiting for data...</div>
+            </div>
+        </section>
+
+        <section id="view-settings" data-view="settings" hidden>
+            <h2>Settings</h2>
+            <form id="settingsForm" autocomplete="off">
+                <div class="setting-group">
+                    <label for="setting-provider">Email Provider</label>
+                    <select id="setting-provider" name="emailProvider">
+                        <option value="auto">Auto-detect</option>
+                        <option value="chrome">Chrome (Outlook Web)</option>
+                        <option value="graph">Microsoft Graph</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-clientId">Graph Client ID</label>
+                    <input id="setting-clientId" type="text" name="graphClientId" placeholder="Azure app client ID" spellcheck="false">
+                </div>
+                <div class="setting-group">
+                    <label for="setting-tenantId">Graph Tenant ID</label>
+                    <input id="setting-tenantId" type="text" name="graphTenantId" placeholder="organizations">
+                </div>
+                <div class="setting-group">
+                    <label for="setting-minScore">Triage Threshold (%)</label>
+                    <input id="setting-minScore" type="number" name="minScore" min="0" max="100">
+                </div>
+                <div class="setting-group">
+                    <label for="setting-vipSenders">VIP Senders</label>
+                    <textarea id="setting-vipSenders" name="vipSenders" rows="3" placeholder="ceo@, vp@, director@"></textarea>
+                    <small>Comma-separated prefixes or addresses</small>
+                </div>
+                <button type="submit" class="btn btn-primary">Save</button>
+                <div id="settingsSaveStatus" class="settings-save-status"></div>
+            </form>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
