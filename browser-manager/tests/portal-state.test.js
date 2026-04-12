@@ -1,4 +1,4 @@
-const { normalizeRoute, mergeEmailUiState } = require('../public/portal-state');
+const { normalizeRoute, writeEmailUiState, mergeEmailUiState } = require('../public/portal-state');
 
 test('normalizeRoute falls back to email', () => {
   expect(normalizeRoute('#unknown')).toBe('email');
@@ -17,4 +17,21 @@ test('mergeEmailUiState never writes flagged state from persisted storage', () =
   const items = [{ id: 'a', flagged: false }];
   const persisted = { a: { pinned: false, done: false, flagged: true, updatedAt: '2026-04-12T00:00:00.000Z' } };
   expect(mergeEmailUiState(items, persisted)[0].uiState.flagged).toBe(false);
+});
+
+test('writeEmailUiState does not throw when localStorage setItem fails', () => {
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const originalLocalStorage = global.localStorage;
+
+  global.localStorage = {
+    setItem: () => {
+      throw new Error('QuotaExceededError');
+    },
+  };
+
+  expect(() => writeEmailUiState({ a: { pinned: true } })).not.toThrow();
+  expect(warnSpy).toHaveBeenCalled();
+
+  global.localStorage = originalLocalStorage;
+  warnSpy.mockRestore();
 });

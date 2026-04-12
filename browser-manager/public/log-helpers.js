@@ -22,7 +22,7 @@ function matchesLogWindow(log, windowValue, now) {
   };
 
   const limit = windowToMs[windowValue] || windowToMs['24h'];
-  return ageMs <= limit;
+  return ageMs >= 0 && ageMs <= limit;
 }
 
 function filterLogs(logs, filters, now) {
@@ -38,7 +38,13 @@ function filterLogs(logs, filters, now) {
         return true;
       }
       const action = String((log && log.action) || '').toLowerCase();
-      const details = JSON.stringify((log && log.details) || {}).toLowerCase();
+      let detailsStr = '';
+      try {
+        detailsStr = JSON.stringify((log && log.details) || {});
+      } catch (_err) {
+        detailsStr = '';
+      }
+      const details = String(detailsStr).toLowerCase();
       return `${action} ${details}`.includes(searchText);
     })
     .filter((log) => {

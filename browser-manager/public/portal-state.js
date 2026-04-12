@@ -38,7 +38,13 @@ function writeEmailUiState(state) {
   }
 
   const safeState = state && typeof state === 'object' ? state : {};
-  localStorage.setItem(constants.EMAIL_STATE_STORAGE_KEY, JSON.stringify(safeState));
+  try {
+    localStorage.setItem(constants.EMAIL_STATE_STORAGE_KEY, JSON.stringify(safeState));
+  } catch (err) {
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+      console.warn('Unable to persist email UI state', err);
+    }
+  }
 }
 
 function mergeEmailUiState(items, persisted) {
