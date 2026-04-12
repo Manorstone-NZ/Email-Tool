@@ -818,6 +818,13 @@ function applyRoute(route) {
   });
 }
 
+function syncRouteHash(route) {
+  const expectedHash = `#${route}`;
+  if (window.location.hash !== expectedHash) {
+    window.history.replaceState(null, '', expectedHash);
+  }
+}
+
 // Initialize dashboard on page load
 let dashboard = null;
 
@@ -947,13 +954,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('hashchange', () => {
-    applyRoute(normalizeRoute(window.location.hash));
+    const route = normalizeRoute(window.location.hash);
+    applyRoute(route);
+    syncRouteHash(route);
   });
 
   // Initial dispatch: apply route immediately, then normalise URL if needed
   const startRoute = normalizeRoute(window.location.hash);
   applyRoute(startRoute);
-  if (window.location.hash !== '#' + startRoute) {
-    window.location.hash = startRoute;
-  }
+  syncRouteHash(startRoute);
 });
