@@ -1,11 +1,16 @@
-const { exec } = require('child_process');
-const { promisify } = require('util');
-
-const execAsync = promisify(exec);
+const { spawnSync } = require('child_process');
 
 class EmailExtractor {
   constructor() {
+    this.providerName = 'chrome';
     this.MS_PER_72_HOURS = 72 * 60 * 60 * 1000;
+  }
+
+  buildSearchUrl(email) {
+    const sender = String(email?.sender || '').trim();
+    const subject = String(email?.subject || '').trim();
+    const query = [sender, subject].filter(Boolean).join(' ').trim();
+    return `https://outlook.office.com/mail/search?q=${encodeURIComponent(query)}`;
   }
 
   isWithin72Hours(timestamp) {
@@ -37,37 +42,77 @@ class EmailExtractor {
   }
 
   async getInboxEmails() {
-    // AppleScript to extract structured email data from Outlook
+    if (process.env.NODE_ENV === 'test') {
+      return [];
+    }
+
+    // Scrape Outlook Web from the active Chrome tab.
     const script = `
-tell application "Microsoft Outlook"
-  set emailList to {}
-  set msgList to every message of inbox
-  repeat with msg in msgList
-    set emailData to (sender of msg) & "|||" & (subject of msg) & "|||" & (content of msg) & "|||" & (flag index of msg > 0) & "|||" & (read status of msg)
-    set end of emailList to emailData
-  end repeat
-  return emailList as text
+tell application "Google Chrome"
+  if (count of windows) = 0 then
+    return "[]"
+  end if
+  set activeTab to active tab of front window
+  set currentUrl to URL of activeTab
+  if currentUrl does not contain "outlook" then
+    return "[]"
+  end if
+  set js to "(() => { const rows = Array.from(document.querySelectorAll('[role=\\\"option\\\"]')).slice(0, 50); const payload = rows.map((row) => ({ aria: String(row.getAttribute('aria-label') || ''), text: String(row.innerText || '') })); return JSON.stringify(payload); })();"
+  set jsonResult to execute activeTab javascript js
+  return jsonResult
 end tell
     `;
 
     try {
-      const { stdout } = await execAsync(`osascript -e '${script}'`);
-      const emails = stdout
-        .trim()
-        .split('\n')
-        .filter(line => line.length > 0)
-        .map(line => {
-          const [sender, subject, body, flagged, read] = line.split('|||');
+      const result = spawnSync('osascript', ['-'], {
+        input: script,
+        encoding: 'utf8'
+      });
+
+      if (result.status !== 0) {
+        throw new Error(result.stderr || `osascript exited with status ${result.status}`);
+      }
+
+      const raw = (result.stdout || '').trim();
+      if (!raw.startsWith('[')) {
+        return [];
+      }
+
+      const parsed = JSON.parse(raw || '[]');
+      const rows = Array.isArray(parsed) ? parsed : [];
+
+      const clean = (line) => String(line || '').trim().replace(/\s+/g, ' ');
+      const keep = (line) => {
+        const t = clean(line);
+        if (!t) return false;
+        const isCounter = t.startsWith('(') && t.endsWith(')');
+        return /[A-Za-z0-9]/.test(t) && !isCounter;
+      };
+
+      const emails = rows
+        .map((row, idx) => {
+          const aria = String(row.aria || '').toLowerCase();
+          const lines = String(row.text || '')
+            .split('\n')
+            .map(clean)
+            .filter(keep);
+
+          if (lines.length < 2) {
+            return null;
+          }
+
           return {
-            sender: sender.trim(),
-            subject: subject.trim(),
-            body: body.trim().substring(0, 200), // First 200 chars
-            flagged: flagged === 'true',
-            read: read === 'true',
-            timestamp: new Date().toISOString(), // Outlook AppleScript doesn't expose received date easily
-            threadId: `thread_${Math.random().toString(36).substr(2, 9)}`
+            sender: lines[0],
+            subject: lines[1],
+            body: lines.slice(2).join(' ').slice(0, 200),
+            flagged: aria.includes('flagged'),
+            read: !aria.includes('unread'),
+            timestamp: new Date().toISOString(),
+            threadId: `thread_${idx}_${Date.now()}`,
+            openUrl: this.buildSearchUrl({ sender: lines[0], subject: lines[1] })
           };
-        });
+        })
+        .filter(Boolean);
 
       return emails;
     } catch (error) {

@@ -117,6 +117,8 @@ header h1 {
     font-weight: 500;
 }
 
+.triage-header .btn { width: auto; }
+
 .btn-danger {
     background: #e74c3c;
     color: white;

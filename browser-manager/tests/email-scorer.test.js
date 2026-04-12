@@ -19,6 +19,12 @@ describe('EmailScorer', () => {
     expect(score).toBeLessThan(10);
   });
 
+  test('scorePrimarySignals: could you please send should score as direct ask', () => {
+    const body = 'Could you please send me the report from yesterday for record keeping.';
+    const score = scorer.scorePrimarySignals({ body, subject: 'Requesting report' });
+    expect(score).toBeGreaterThanOrEqual(20);
+  });
+
   test('scoreSecondarySignals: flagged email should score high', () => {
     const score = scorer.scoreSecondarySignals({ flagged: true, sender: 'random@example.com' });
     expect(score).toBeGreaterThan(10);
@@ -61,5 +67,44 @@ describe('EmailScorer', () => {
     };
     const result = scorer.score(email);
     expect(result.score).toBeLessThan(40);
+  });
+
+  test('scoreSecondarySignals: custom VIP sender list should be honored', () => {
+    const customScorer = new EmailScorer({ vipSenders: ['founder@startup.com'] });
+    const score = customScorer.scoreSecondarySignals({
+      flagged: false,
+      sender: 'founder@startup.com',
+      body: 'Please review this proposal.'
+    });
+
+    expect(score).toBeGreaterThanOrEqual(15);
+  });
+
+  test('score reason should include VIP sender when custom list matches', () => {
+    const customScorer = new EmailScorer({ vipSenders: ['chair@board.org'] });
+    const result = customScorer.score({
+      sender: 'chair@board.org',
+      subject: 'Decision needed',
+      body: 'Can you confirm this today?',
+      flagged: false,
+      read: false,
+      timestamp: new Date().toISOString()
+    });
+
+    expect(result.reason).toContain('VIP sender');
+  });
+
+  test('score: actionable threshold (>=20) should not be labeled Ignore', () => {
+    const result = scorer.score({
+      sender: 'ops@company.com',
+      subject: 'Need approval this week',
+      body: 'Could you please review and approve this change request?',
+      flagged: false,
+      read: false,
+      timestamp: new Date().toISOString()
+    });
+
+    expect(result.score).toBeGreaterThanOrEqual(20);
+    expect(result.action).not.toBe('Ignore');
   });
 });

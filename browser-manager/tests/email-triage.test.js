@@ -69,4 +69,23 @@ describe('EmailTriage', () => {
       expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
     }
   });
+
+  test('run should use configurable minimum score threshold', async () => {
+    triage = new EmailTriage(mockExtractor, mockScorer, { minScore: 35 });
+
+    mockExtractor.getInboxEmails = jest.fn().mockResolvedValue([
+      { sender: 'a@b.com', subject: 'one', body: 'x', flagged: false, read: true, timestamp: new Date().toISOString(), threadId: '1' }
+    ]);
+    mockScorer.score = jest.fn().mockReturnValue({
+      email: { sender: 'a@b.com', subject: 'one', body: 'x', openUrl: 'https://outlook.office.com/mail/search?q=one' },
+      score: 36,
+      action: 'Review Later',
+      reason: 'Direct ask for action',
+      signals: { primary: 20, secondary: 10, weak: 6, exclusion: 0 }
+    });
+
+    const results = await triage.run();
+    expect(results.length).toBe(1);
+    expect(results[0].score).toBe(36);
+  });
 });

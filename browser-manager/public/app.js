@@ -113,15 +113,16 @@ class DashboardClient {
 
   createEventElement(event) {
     const timestamp = new Date(event.timestamp).toLocaleTimeString();
-    const details = JSON.stringify(event.details || {});
+    const details = this.escapeHtml(JSON.stringify(event.details || {}));
+    const eventType = this.escapeHtml(event.type);
 
     return `
-      <div class="event-item ${event.type}">
+      <div class="event-item ${eventType}">
         <div class="event-header">
-          <span class="event-type ${event.type}">${event.type}</span>
+          <span class="event-type ${eventType}">${eventType}</span>
           <span class="event-timestamp">${timestamp}</span>
         </div>
-        <div class="event-action">${event.action || 'Unknown'}</div>
+        <div class="event-action">${this.escapeHtml(event.action || 'Unknown')}</div>
         <div class="event-details">${details}</div>
       </div>
     `;
@@ -278,7 +279,7 @@ class DashboardClient {
         }
 
           const subject = this.escapeHtml(item.subject || 'No subject');
-          const linkedSubject = item.openUrl
+          const linkedSubject = item.openUrl && isSafeUrl(item.openUrl)
             ? `<a class="triage-link" target="_blank" rel="noopener noreferrer" href="${this.escapeHtml(item.openUrl)}">${subject}</a>`
             : subject;
 
@@ -306,6 +307,14 @@ class DashboardClient {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
   }
+}
+
+// ── URL safety helper ──────────────────────────────────────────────────────
+function isSafeUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch { return false; }
 }
 
 // ── Route helpers ──────────────────────────────────────────────────────────

@@ -43,4 +43,14 @@ describe('EmailExtractor', () => {
     const emails = await extractor.getInboxEmails();
     expect(Array.isArray(emails)).toBe(true);
   });
+
+  test('buildSearchUrl should create Outlook search link from sender and subject', () => {
+    const url = extractor.buildSearchUrl({
+      sender: 'alice@company.com',
+      subject: 'Budget Approval Needed'
+    });
+
+    expect(url).toContain('outlook.office.com/mail/search');
+    expect(url).toContain(encodeURIComponent('alice@company.com Budget Approval Needed'));
+  });
 });

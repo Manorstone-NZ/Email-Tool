@@ -1,6 +1,8 @@
 class EmailScorer {
-  constructor() {
-    this.VIP_SENDERS = ['ceo@', 'board@', 'vp@', 'director@'];
+  constructor(options = {}) {
+    this.vipSenders = Array.isArray(options.vipSenders) && options.vipSenders.length > 0
+      ? options.vipSenders.map((item) => String(item).toLowerCase())
+      : ['ceo@', 'board@', 'vp@', 'director@'];
     this.actionKeywords = ['approve', 'confirm', 'can you', 'need', 'required', 'decision', 'action'];
     this.exclusionPatterns = [
       /newsletter/i,
@@ -14,9 +16,10 @@ class EmailScorer {
   scorePrimarySignals(email) {
     let score = 0;
     const body = (email.body || '').toLowerCase();
+    const directAskPattern = /\b(can you|could you|would you|please\s+(review|send|confirm|approve)|let me know|need your|requesting)\b/;
 
     // Direct ask or question
-    if (/\?/.test(body) || this.actionKeywords.some(kw => body.includes(kw))) {
+    if (/\?/.test(body) || directAskPattern.test(body) || this.actionKeywords.some(kw => body.includes(kw))) {
       score += 20;
     }
 
@@ -35,9 +38,10 @@ class EmailScorer {
 
   scoreSecondarySignals(email) {
     let score = 0;
+    const sender = (email.sender || '').toLowerCase();
 
     // VIP sender
-    if (this.VIP_SENDERS.some(vip => email.sender.includes(vip))) {
+    if (this.vipSenders.some(vip => sender.includes(vip))) {
       score += 15;
     }
 
@@ -103,12 +107,13 @@ class EmailScorer {
     let action = 'Ignore';
     if (totalScore >= 75) action = 'Approve / Decide';
     else if (totalScore >= 60) action = 'Review / Respond';
-    else if (totalScore >= 45) action = 'Review Later';
+    else if (totalScore >= 20) action = 'Review Later';
 
     // Generate reason
     const reasons = [];
+    const sender = (email.sender || '').toLowerCase();
     if (primary > 20) reasons.push('Direct ask for action');
-    if (this.VIP_SENDERS.some(vip => email.sender.includes(vip))) reasons.push('VIP sender');
+    if (this.vipSenders.some(vip => sender.includes(vip))) reasons.push('VIP sender');
     if (email.flagged) reasons.push('Flagged');
     if (!email.read) reasons.push('Unread');
 
