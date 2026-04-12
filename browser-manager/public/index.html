@@ -134,6 +134,11 @@
                     <textarea id="setting-vipSenders" name="vipSenders" rows="3" placeholder="ceo@, vp@, director@"></textarea>
                     <small>Comma-separated prefixes or addresses</small>
                 </div>
+                <div class="setting-group">
+                    <label for="setting-extra">Additional Settings (JSON)</label>
+                    <textarea id="setting-extra" name="extraSettingsJson" rows="6" placeholder="{&#10;  &quot;graphScopes&quot;: [&quot;Mail.Read&quot;, &quot;User.Read&quot;]&#10;}"></textarea>
+                    <small>Any custom keys you add are loaded here and saved back to settings.</small>
+                </div>
                 <button type="submit" class="btn btn-primary">Save</button>
                 <div id="settingsSaveStatus" class="settings-save-status"></div>
             </form>

@@ -345,12 +345,23 @@ class DashboardClient {
 
   fillSettingsForm(s) {
     const f = (id) => document.getElementById(id);
+    const settings = s && typeof s === 'object' ? s : {};
+    const knownKeys = new Set(['emailProvider', 'graphClientId', 'graphTenantId', 'minScore', 'vipSenders']);
     if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
     if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
     if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
     if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
     if (f('setting-vipSenders')) {
       f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
+    }
+    const extraSettings = {};
+    Object.keys(settings).forEach((key) => {
+      if (!knownKeys.has(key)) {
+        extraSettings[key] = settings[key];
+      }
+    });
+    if (f('setting-extra')) {
+      f('setting-extra').value = Object.keys(extraSettings).length ? JSON.stringify(extraSettings, null, 2) : '';
     }
   }
 
@@ -361,15 +372,26 @@ class DashboardClient {
     if (statusEl) statusEl.textContent = 'Saving…';
 
     const vipRaw = formData.get('vipSenders') || '';
-    const payload = {
-      emailProvider: formData.get('emailProvider'),
-      graphClientId: formData.get('graphClientId'),
-      graphTenantId: formData.get('graphTenantId') || 'organizations',
-      minScore: Number(formData.get('minScore')) || 20,
-      vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean)
-    };
-
     try {
+      const extraRaw = String(formData.get('extraSettingsJson') || '').trim();
+      let extraSettings = {};
+      if (extraRaw) {
+        const parsed = JSON.parse(extraRaw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('Additional Settings must be a JSON object');
+        }
+        extraSettings = parsed;
+      }
+
+      const payload = {
+        emailProvider: formData.get('emailProvider'),
+        graphClientId: formData.get('graphClientId'),
+        graphTenantId: formData.get('graphTenantId') || 'organizations',
+        minScore: Number(formData.get('minScore')) || 20,
+        vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
+        extraSettings
+      };
+
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
