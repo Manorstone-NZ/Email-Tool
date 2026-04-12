@@ -50,6 +50,14 @@ class DashboardServer {
   }
 
   setup() {
+    // Disable caching so portal UI changes are reflected immediately.
+    this.app.use((req, res, next) => {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      next();
+    });
+
     // Serve static files
     this.app.use(express.static(path.join(__dirname, 'public')));
     this.app.use(express.json());
