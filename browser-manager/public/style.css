@@ -702,3 +702,248 @@ header h1 {
         align-items: flex-start;
     }
 }
+
+/* ── Logs View Styles ────────────────────────────────────────────────────────  */
+
+.logs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.logs-header h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #333;
+}
+
+.logs-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.logs-result-count {
+    color: #666;
+    font-size: 14px;
+}
+
+.logs-live-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.live-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.live-toggle-input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #2ecc71;
+}
+
+.live-toggle-text {
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+.logs-live-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #856404;
+    font-weight: 500;
+}
+
+.logs-filter-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    flex-wrap: wrap;
+}
+
+.logs-search-input,
+.logs-filter-select {
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+    background: white;
+}
+
+.logs-search-input {
+    flex: 1;
+    min-width: 200px;
+}
+
+.logs-search-input::placeholder {
+    color: #999;
+}
+
+.logs-filter-select {
+    min-width: 150px;
+    cursor: pointer;
+}
+
+.logs-filter-select:focus,
+.logs-search-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.btn-secondary {
+    padding: 10px 16px;
+    background: #e9ecef;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.btn-secondary:hover {
+    background: #dee2e6;
+    color: #000;
+}
+
+.logs-table-container {
+    overflow-x: auto;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    background: white;
+}
+
+.logs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.logs-table thead {
+    background: #f8f9fa;
+    border-bottom: 2px solid #ddd;
+}
+
+.logs-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #333;
+    white-space: nowrap;
+}
+
+.logs-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+}
+
+.logs-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.logs-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.logs-table tbody tr.is-expanded {
+    background: #f0f4ff;
+}
+
+.logs-col-timestamp {
+    width: 180px;
+}
+
+.logs-col-type {
+    width: 100px;
+}
+
+.logs-col-action {
+    width: 150px;
+}
+
+.logs-table-type-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+
+.logs-table-type-badge.automation {
+    background: #e7f3ff;
+    color: #0050b3;
+}
+
+.logs-table-type-badge.user {
+    background: #f6ffed;
+    color: #274b11;
+}
+
+.logs-table-details-row {
+    background: #f5f7fa !important;
+}
+
+.logs-table-details-row td {
+    padding: 16px;
+}
+
+.logs-details-content {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 12px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    color: #333;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.logs-refresh-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    color: #667eea;
+    font-weight: 500;
+}
+
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #c9c9c9;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

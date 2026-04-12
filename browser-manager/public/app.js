@@ -13,6 +13,13 @@ class DashboardClient {
       state: null,     // null means 'All', or one of 'Flagged', 'Pinned', 'Done'
       tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
     };
+    // Logs state (session-only, no persistence)
+    this.logs = [];
+    this.logsFilterSearch = '';
+    this.logsFilterType = 'all';
+    this.logsFilterWindow = '24h';
+    this.logsIsLive = true;
+    this.logsExpandedRowId = null;
   }
 
   connect() {
@@ -34,9 +41,16 @@ class DashboardClient {
         const data = JSON.parse(event.data);
         if (data.type === 'events') {
           this.events = data.events;
+          this.logs = data.events || [];
           this.renderEvents();
           this.updateStats();
+          this.renderLogs();
         } else if (data.type === 'event' && data.event) {
+          // Only append to logs if live mode is ON
+          if (typeof LogHelpers !== 'undefined' && LogHelpers.shouldAppendLiveEvent(this.logsIsLive)) {
+            this.logs.push(data.event);
+            this.renderLogs();
+          }
           this.events.push(data.event);
           this.renderEvents();
           this.updateStats();
@@ -173,6 +187,160 @@ class DashboardClient {
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
+  }
+
+  // ── Logs rendering and filtering ──────────────────────────────────────────
+  renderLogs() {
+    const tableBody = document.getElementById('logsTableBody');
+    const emptyState = document.getElementById('logsEmptyState');
+    const resultCount = document.getElementById('logsResultCount');
+
+    if (!tableBody) return;
+
+    // Build filter object for LogHelpers
+    const filters = {
+      search: this.logsFilterSearch,
+      type: this.logsFilterType === 'all' ? null : this.logsFilterType,
+      window: this.logsFilterWindow,
+    };
+
+    // Use LogHelpers.filterLogs if available
+    const filteredLogs = typeof LogHelpers !== 'undefined' && LogHelpers.filterLogs
+      ? LogHelpers.filterLogs(this.logs, filters, new Date())
+      : this.logs;
+
+    // Sort newest first
+    const sortedLogs = filteredLogs.slice().sort((a, b) => {
+      const timeA = new Date(a.timestamp || 0).getTime();
+      const timeB = new Date(b.timestamp || 0).getTime();
+      return timeB - timeA;
+    });
+
+    // Update result count
+    if (resultCount) {
+      resultCount.textContent = `${sortedLogs.length} result${sortedLogs.length !== 1 ? 's' : ''}`;
+    }
+
+    // Clear table
+    tableBody.innerHTML = '';
+
+    // Show/hide empty state
+    if (sortedLogs.length === 0) {
+      if (emptyState) {
+        emptyState.hidden = false;
+        if (this.logsFilterSearch || this.logsFilterType !== 'all' || this.logsFilterWindow !== '24h') {
+          emptyState.textContent = 'No results match current filters.';
+        } else {
+          emptyState.textContent = 'No logs found.';
+        }
+      }
+      return;
+    }
+
+    if (emptyState) {
+      emptyState.hidden = true;
+    }
+
+    // Render rows
+    sortedLogs.forEach((log, index) => {
+      // Use index-based ID to ensure consistency across re-renders
+      const logId = `log-${index}`;
+      const isExpanded = this.logsExpandedRowId === logId;
+
+      // Main row
+      const row = document.createElement('tr');
+      row.className = `logs-table-row ${isExpanded ? 'is-expanded' : ''}`;
+      row.dataset.logId = logId;
+
+      const timestamp = new Date(log.timestamp || new Date()).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+
+      const dateStr = new Date(log.timestamp || new Date()).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+      });
+
+      const typeBadge = `<span class="logs-table-type-badge ${log.type}">${log.type || 'unknown'}</span>`;
+      const action = this.escapeHtml(log.action || 'N/A');
+      const summary = this.escapeHtml((log.summary || log.details?.subject || ''));
+      const truncatedSummary = summary.length > 60 ? summary.substring(0, 57) + '...' : summary;
+
+      row.innerHTML = `
+        <td class="logs-col-timestamp">${dateStr} ${timestamp}</td>
+        <td class="logs-col-type">${typeBadge}</td>
+        <td class="logs-col-action">${action}</td>
+        <td class="logs-col-summary">${truncatedSummary}</td>
+      `;
+
+      row.addEventListener('click', () => {
+        this.handleLogsRowExpand(logId);
+      });
+
+      tableBody.appendChild(row);
+
+      // Details row (hidden by default)
+      if (isExpanded) {
+        const detailsRow = document.createElement('tr');
+        detailsRow.className = 'logs-table-details-row';
+        detailsRow.dataset.logId = logId;
+        const detailsJson = this.escapeHtml(JSON.stringify(log, null, 2));
+        detailsRow.innerHTML = `
+          <td colspan="4">
+            <div class="logs-details-content">${detailsJson}</div>
+          </td>
+        `;
+        tableBody.appendChild(detailsRow);
+      }
+    });
+  }
+
+  handleLogsFilterChange() {
+    this.renderLogs();
+  }
+
+  handleLogsRowExpand(logId) {
+    if (this.logsExpandedRowId === logId) {
+      this.logsExpandedRowId = null;
+    } else {
+      this.logsExpandedRowId = logId;
+    }
+    this.renderLogs();
+  }
+
+  async handleLogsLiveToggle(isLive) {
+    this.logsIsLive = isLive;
+
+    // Update badge visibility
+    const badge = document.getElementById('logsLivePausedBadge');
+    if (badge) {
+      badge.hidden = isLive;
+    }
+
+    // If toggling ON, show refresh indicator and fetch fresh logs
+    if (isLive) {
+      const refreshIndicator = document.getElementById('logsRefreshIndicator');
+      if (refreshIndicator) {
+        refreshIndicator.hidden = false;
+      }
+
+      try {
+        const response = await fetch('/api/events');
+        const data = await response.json();
+        this.logs = data.events || [];
+        this.renderLogs();
+      } catch (e) {
+        console.error('Failed to fetch logs:', e);
+      } finally {
+        if (refreshIndicator) {
+          refreshIndicator.hidden = true;
+        }
+      }
+    }
+
+    this.renderLogs();
   }
 
   fillSettingsForm(s) {
@@ -638,7 +806,12 @@ function normalizeRoute(hash) {
 
 function applyRoute(route) {
   document.querySelectorAll('[data-view]').forEach((node) => {
-    node.hidden = node.dataset.view !== route;
+    const isVisible = node.dataset.view === route;
+    node.hidden = !isVisible;
+    // Initialize logs view when it becomes active
+    if (isVisible && node.dataset.view === 'logs' && dashboard) {
+      dashboard.renderLogs();
+    }
   });
   document.querySelectorAll('[data-route]').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.route === route);
@@ -719,6 +892,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load current settings into form
   dashboard.loadSettings();
+
+  // ── Logs filter handlers ──────────────────────────────────────────────────
+  const logsSearchInput = document.getElementById('logsSearchInput');
+  if (logsSearchInput) {
+    logsSearchInput.addEventListener('input', (e) => {
+      dashboard.logsFilterSearch = e.target.value;
+      dashboard.handleLogsFilterChange();
+    });
+  }
+
+  const logsTypeSelect = document.getElementById('logsTypeSelect');
+  if (logsTypeSelect) {
+    logsTypeSelect.addEventListener('change', (e) => {
+      dashboard.logsFilterType = e.target.value;
+      dashboard.handleLogsFilterChange();
+    });
+  }
+
+  const logsWindowSelect = document.getElementById('logsWindowSelect');
+  if (logsWindowSelect) {
+    logsWindowSelect.addEventListener('change', (e) => {
+      dashboard.logsFilterWindow = e.target.value;
+      dashboard.handleLogsFilterChange();
+    });
+  }
+
+  const logsClearFiltersBtn = document.getElementById('logsClearFiltersBtn');
+  if (logsClearFiltersBtn) {
+    logsClearFiltersBtn.addEventListener('click', () => {
+      dashboard.logsFilterSearch = '';
+      dashboard.logsFilterType = 'all';
+      dashboard.logsFilterWindow = '24h';
+      dashboard.logsExpandedRowId = null;
+      if (logsSearchInput) logsSearchInput.value = '';
+      if (logsTypeSelect) logsTypeSelect.value = 'all';
+      if (logsWindowSelect) logsWindowSelect.value = '24h';
+      dashboard.handleLogsFilterChange();
+    });
+  }
+
+  const logsLiveToggle = document.getElementById('logsLiveToggle');
+  if (logsLiveToggle) {
+    logsLiveToggle.addEventListener('change', (e) => {
+      dashboard.handleLogsLiveToggle(e.target.checked);
+    });
+  }
 
   // ── Route controller ──────────────────────────────────────────────────────
   document.querySelectorAll('[data-route]').forEach((btn) => {
