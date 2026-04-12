@@ -516,11 +516,13 @@ class DashboardClient {
         }
 
         const state = PortalState.readEmailUiState();
-        const current = state[itemId] || {};
+        const currentUiState = item && item.uiState ? item.uiState : {};
+        const newPinnedValue = !Boolean(currentUiState.pinned);
+        const newDoneValue = Boolean(currentUiState.done);
         state[itemId] = {
-          ...current,
-          pinned: !Boolean(current.pinned),
-          done: Boolean(current.done),
+          pinned: Boolean(newPinnedValue),
+          done: Boolean(newDoneValue),
+          updatedAt: new Date().toISOString(),
         };
 
         PortalState.writeEmailUiState(state);
@@ -535,10 +537,13 @@ class DashboardClient {
         }
 
         const state = PortalState.readEmailUiState();
-        const current = state[itemId] || {};
+        const currentUiState = item && item.uiState ? item.uiState : {};
+        const newPinnedValue = Boolean(currentUiState.pinned);
+        const newDoneValue = !Boolean(currentUiState.done);
         state[itemId] = {
-          ...current,
-          done: true,
+          pinned: Boolean(newPinnedValue),
+          done: Boolean(newDoneValue),
+          updatedAt: new Date().toISOString(),
         };
 
         PortalState.writeEmailUiState(state);
