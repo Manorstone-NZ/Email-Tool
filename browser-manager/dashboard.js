@@ -10,12 +10,13 @@ function isPlainObject(value) {
 
 function buildSettingsUpdates(body) {
   const input = isPlainObject(body) ? body : {};
-  const { emailProvider, graphClientId, graphTenantId, minScore, vipSenders, extraSettings } = input;
+  const { emailProvider, graphClientId, graphTenantId, lookbackDays, minScore, vipSenders, extraSettings } = input;
   const updates = {};
 
   if (emailProvider !== undefined) updates.emailProvider = String(emailProvider);
   if (graphClientId !== undefined) updates.graphClientId = String(graphClientId).trim();
   if (graphTenantId !== undefined) updates.graphTenantId = String(graphTenantId).trim() || 'organizations';
+  if (lookbackDays !== undefined) updates.lookbackDays = Number(lookbackDays);
   if (minScore !== undefined) updates.minScore = Number(minScore);
   if (vipSenders !== undefined) {
     updates.vipSenders = Array.isArray(vipSenders)
@@ -146,6 +147,9 @@ class DashboardServer {
 
       try {
         const saved = saveSettings(updates);
+        if (this.manager && typeof this.manager.applySettings === 'function') {
+          this.manager.applySettings(saved);
+        }
         res.json({ success: true, settings: saved });
       } catch (error) {
         res.status(500).json({ success: false, error: error.message });

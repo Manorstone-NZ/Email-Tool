@@ -130,6 +130,11 @@
                     <input id="setting-minScore" type="number" name="minScore" min="0" max="100">
                 </div>
                 <div class="setting-group">
+                    <label for="setting-lookbackDays">Inbox Lookback (days)</label>
+                    <input id="setting-lookbackDays" type="number" name="lookbackDays" min="1" max="60">
+                    <small>Graph triage scans messages in this recent window (plus flagged).</small>
+                </div>
+                <div class="setting-group">
                     <label for="setting-vipSenders">VIP Senders</label>
                     <textarea id="setting-vipSenders" name="vipSenders" rows="3" placeholder="ceo@, vp@, director@"></textarea>
                     <small>Comma-separated prefixes or addresses</small>

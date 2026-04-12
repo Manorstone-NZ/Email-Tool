@@ -346,10 +346,11 @@ class DashboardClient {
   fillSettingsForm(s) {
     const f = (id) => document.getElementById(id);
     const settings = s && typeof s === 'object' ? s : {};
-    const knownKeys = new Set(['emailProvider', 'graphClientId', 'graphTenantId', 'minScore', 'vipSenders']);
+    const knownKeys = new Set(['emailProvider', 'graphClientId', 'graphTenantId', 'lookbackDays', 'minScore', 'vipSenders']);
     if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
     if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
     if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
+    if (f('setting-lookbackDays')) f('setting-lookbackDays').value = s.lookbackDays ?? 3;
     if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
     if (f('setting-vipSenders')) {
       f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
@@ -387,6 +388,7 @@ class DashboardClient {
         emailProvider: formData.get('emailProvider'),
         graphClientId: formData.get('graphClientId'),
         graphTenantId: formData.get('graphTenantId') || 'organizations',
+        lookbackDays: Number(formData.get('lookbackDays')) || 3,
         minScore: Number(formData.get('minScore')) || 20,
         vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
         extraSettings
