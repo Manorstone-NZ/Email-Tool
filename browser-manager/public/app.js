@@ -17,8 +17,8 @@ class DashboardClient {
     this.logs = [];
     this.logsFilterSearch = '';
     this.logsFilterType = 'all';
-    this.logsFilterWindow = '24h';
-    this.logsIsLive = true;
+    this.logsFilterWindow = '15m';
+    this.logsIsLive = false;
     this.logsExpandedRowId = null;
   }
 
@@ -228,7 +228,7 @@ class DashboardClient {
     if (sortedLogs.length === 0) {
       if (emptyState) {
         emptyState.hidden = false;
-        if (this.logsFilterSearch || this.logsFilterType !== 'all' || this.logsFilterWindow !== '24h') {
+        if (this.logsFilterSearch || this.logsFilterType !== 'all' || this.logsFilterWindow !== '15m') {
           emptyState.textContent = 'No results match current filters.';
         } else {
           emptyState.textContent = 'No logs found.';
@@ -930,20 +930,26 @@ document.addEventListener('DOMContentLoaded', () => {
     logsClearFiltersBtn.addEventListener('click', () => {
       dashboard.logsFilterSearch = '';
       dashboard.logsFilterType = 'all';
-      dashboard.logsFilterWindow = '24h';
+      dashboard.logsFilterWindow = '15m';
       dashboard.logsExpandedRowId = null;
       if (logsSearchInput) logsSearchInput.value = '';
       if (logsTypeSelect) logsTypeSelect.value = 'all';
-      if (logsWindowSelect) logsWindowSelect.value = '24h';
+      if (logsWindowSelect) logsWindowSelect.value = '15m';
       dashboard.handleLogsFilterChange();
     });
   }
 
   const logsLiveToggle = document.getElementById('logsLiveToggle');
   if (logsLiveToggle) {
+    logsLiveToggle.checked = dashboard.logsIsLive;
     logsLiveToggle.addEventListener('change', (e) => {
       dashboard.handleLogsLiveToggle(e.target.checked);
     });
+  }
+
+  const logsLivePausedBadge = document.getElementById('logsLivePausedBadge');
+  if (logsLivePausedBadge) {
+    logsLivePausedBadge.hidden = dashboard.logsIsLive;
   }
 
   // ── Route controller ──────────────────────────────────────────────────────
