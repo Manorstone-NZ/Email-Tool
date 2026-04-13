@@ -2,12 +2,14 @@ describe('Categorisation UI Components', () => {
   let container;
 
   beforeEach(() => {
+    jest.resetModules();
     container = document.createElement('div');
     document.body.appendChild(container);
   });
 
   afterEach(() => {
     document.body.removeChild(container);
+    document.body.innerHTML = '';
   });
 
   describe('renderCategoryBadge', () => {

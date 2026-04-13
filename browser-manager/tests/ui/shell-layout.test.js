@@ -147,11 +147,11 @@ async function bootstrapApp() {
 }
 
 function getActiveRoute() {
-  return document.querySelector('.portal-nav [data-route].is-active')?.dataset.route || null;
+  return document.querySelector('.app-sidebar .shell-nav-link[data-route].is-active')?.dataset.route || null;
 }
 
 function getSidebarRouteLabels() {
-  return Array.from(document.querySelectorAll('.portal-nav [data-route]')).map((node) => node.textContent.trim());
+  return Array.from(document.querySelectorAll('.app-sidebar .shell-nav-link[data-route]')).map((node) => node.textContent.trim());
 }
 
 function restoreGlobal(name, value) {
