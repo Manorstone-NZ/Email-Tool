@@ -256,17 +256,19 @@ Replaces the 260px filter rail sidebar. Sits below the search bar.
 - "All" uses `var(--accent-brand)` when active (dark pill).
 - Counts are inline, slightly lower opacity.
 
-**Row 2 — State + tag filters:**
+**Row 2 — State + overflow + filter control:**
 - Smaller ghost-style pills: `Flagged`, `Pinned`, `Done`.
-- A filter icon button on the right opens a **tag filter popover**.
+- **Tag overflow pill:** When tag filters are active, shows a summary pill like `+3 tags` (clickable to expand/manage). When no tags are active, this pill is hidden.
+- **Filter button** (gear/filter icon, rightmost): Opens a **full filter panel** popover that shows all available tags as toggleable pills, plus any future filter dimensions. This is the escape hatch for complexity — the pill bar stays clean, and the filter panel handles the long tail.
 - Separated from category pills by 4px vertical gap.
 - Divider line (`var(--border-subtle)`) below this row.
 
-**Tag filter popover:**
-- Triggered by the filter icon button.
+**Tag filter panel (opened via filter button):**
+- Popover/dropdown panel below the filter button.
 - Shows all available tags (derived from current triage items) as toggleable pills.
 - Multiple tags can be selected (OR logic within tags — email matches if it has ANY selected tag).
-- When tag filters are active, the selected tags appear as small pills inline in the filter bar (between state pills and the filter icon), so the user can see what's active and click to remove.
+- When tags are selected: the `+N tags` overflow pill appears in row 2 showing the count. Clicking it also opens this panel.
+- A "Clear tags" link at the bottom of the panel resets tag selection.
 
 ### 3.4 Smart Priority Grouping & Scoring
 
@@ -280,7 +282,17 @@ The email list is organized into priority tiers derived from the existing scorin
 | **Review** | urgency `medium` OR (urgency `high` AND score < 70) | Section header with amber tint (`#fef8ec`), label "Review" with count. Amber left-border on rows. |
 | **Low Priority** | urgency `low` | Section header with muted tint (`#f5f3f0`), label "Low Priority" with count. Neutral left-border on rows. |
 
-**Section headers:** Lightweight dividers between groups — not heavy cards. A thin horizontal line with the tier label (11px uppercase, tier color) and count on the left. Collapsible — clicking the header toggles the section open/closed (all open by default).
+**Critical rule: Grouping must never hide items or change filter results — only reorder them.** Grouping is purely visual. All filters (category, state, tag, search) apply first and determine which emails are visible. Grouping then organizes the visible set into tiers. Collapsing a tier section hides the rows visually but they still count in all pill counts and are still accessible by expanding the section. No email is ever removed from the list by the grouping system.
+
+**Section headers:** Lightweight dividers between groups — not heavy cards. A thin horizontal line with the tier label (11px uppercase, tier color) and count on the left. Collapsible — clicking the header toggles the section open/closed (all open by default). Empty tiers are hidden entirely.
+
+**Act Now tier — unmistakable treatment:**
+Act Now emails get three subtle but distinct visual differences that make them impossible to miss:
+- Subject text uses `font-weight: 700` (bold) instead of the normal `500` (medium).
+- A small "Action required" label appears after the category pill (11px, `--cat-needs-reply` foreground, no background — just colored text).
+- Row padding is slightly taller: `14px 14px` instead of `12px 14px` — gives them breathing room without being jarring.
+
+These are not loud — but combined with the rose heat border and the section header, Act Now items are unmistakable at a glance.
 
 **Heat-gradient left border:** Each email row gets a 3px left border whose color maps to its score:
 - 80–100: warm rose `#c0564a`
