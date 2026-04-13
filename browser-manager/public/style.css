@@ -31,6 +31,10 @@ body {
     background: var(--canvas-bg);
 }
 
+.app-sidebar-toggle {
+    display: none;
+}
+
 .app-sidebar {
     background: var(--shell-bg);
     border-right: 1px solid var(--line);
@@ -107,16 +111,39 @@ body {
         grid-template-columns: minmax(0, 1fr);
     }
 
+    .app-sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1101;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--shell-text);
+        font-size: 14px;
+        font-weight: 600;
+        padding: 8px 12px;
+        cursor: pointer;
+    }
+
     .app-sidebar {
         position: fixed;
         inset: 0 auto 0 0;
         width: 220px;
         transform: translateX(-100%);
+        transition: transform 0.2s ease;
         z-index: 1000;
     }
 
+    body.sidebar-open .app-sidebar {
+        transform: translateX(0);
+    }
+
     .portal-main {
-        padding: 18px;
+        padding: 56px 18px 18px;
     }
 }
 

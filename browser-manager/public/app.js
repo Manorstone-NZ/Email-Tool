@@ -1271,6 +1271,27 @@ function syncRouteHash(route) {
   }
 }
 
+function isCompactViewport() {
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(max-width: 1099px)').matches;
+  }
+  return window.innerWidth <= 1099;
+}
+
+function setSidebarOpen(isOpen) {
+  document.body.classList.toggle('sidebar-open', Boolean(isOpen));
+  const toggleBtn = document.getElementById('sidebarToggleBtn');
+  if (toggleBtn) {
+    toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function closeSidebarOnCompactViewport() {
+  if (isCompactViewport()) {
+    setSidebarOpen(false);
+  }
+}
+
 function toggleFilterValue(currentValue, nextValue) {
   const next = nextValue || null;
   if (!next) {
@@ -1285,6 +1306,14 @@ let dashboard = null;
 document.addEventListener('DOMContentLoaded', () => {
   dashboard = new DashboardClient();
   dashboard.connect();
+
+  const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+  if (sidebarToggleBtn) {
+    sidebarToggleBtn.addEventListener('click', () => {
+      const isOpen = document.body.classList.contains('sidebar-open');
+      setSidebarOpen(!isOpen);
+    });
+  }
 
   // Periodically query events if not connected via WebSocket
   setInterval(() => {
@@ -1415,6 +1444,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-route]').forEach((btn) => {
     btn.addEventListener('click', () => {
       window.location.hash = btn.dataset.route;
+      closeSidebarOnCompactViewport();
     });
   });
 
@@ -1422,6 +1452,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const route = normalizeRoute(window.location.hash);
     applyRoute(route);
     syncRouteHash(route);
+    closeSidebarOnCompactViewport();
   });
 
   // Initial dispatch: apply route immediately, then normalise URL if needed

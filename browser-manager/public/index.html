@@ -8,7 +8,9 @@
 </head>
 <body>
     <div class="app-shell">
-        <aside class="app-sidebar" data-region="app-sidebar">
+        <button type="button" id="sidebarToggleBtn" class="app-sidebar-toggle" aria-controls="appSidebar" aria-expanded="false">Menu</button>
+
+        <aside id="appSidebar" class="app-sidebar" data-region="app-sidebar">
             <button type="button" data-route="email" class="shell-nav-link is-active">Email</button>
             <button type="button" data-route="settings" class="shell-nav-link">Settings</button>
             <button type="button" data-route="logs" class="shell-nav-link">Logs</button>
