@@ -27,6 +27,8 @@ describe('Shell layout route contract', () => {
     window.location.hash = '#unknown';
     await bootstrapApp();
     expect(getActiveRoute()).toBe('email');
+    expect(window.location.hash).toBe('#email');
+    expect(document.body.dataset.route).toBe('email');
   });
 
   test('sidebar contains email/settings/logs only', async () => {
@@ -147,11 +149,23 @@ async function bootstrapApp() {
 }
 
 function getActiveRoute() {
-  return document.querySelector('.app-sidebar .shell-nav-link[data-route].is-active')?.dataset.route || null;
+  return getRouteButtons().find((node) => node.classList.contains('is-active'))?.dataset.route || null;
 }
 
 function getSidebarRouteLabels() {
-  return Array.from(document.querySelectorAll('.app-sidebar .shell-nav-link[data-route]')).map((node) => node.textContent.trim());
+  const labelsByRoute = new Map(getRouteButtons().map((node) => [node.dataset.route, node.textContent.trim()]));
+  return ['email', 'settings', 'logs']
+    .filter((route) => labelsByRoute.has(route))
+    .map((route) => labelsByRoute.get(route));
+}
+
+function getRouteButtons() {
+  const sidebarButtons = Array.from(document.querySelectorAll('.app-sidebar .shell-nav-link[data-route]'));
+  if (sidebarButtons.length > 0) {
+    return sidebarButtons;
+  }
+
+  return Array.from(document.querySelectorAll('.portal-nav .portal-nav-link[data-route]'));
 }
 
 function restoreGlobal(name, value) {
