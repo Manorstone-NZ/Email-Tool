@@ -8,6 +8,8 @@ const {
   resolveDisplayTimestamp,
   warnIfLargeEmailList,
   countEmailBuckets,
+  getCategoryColor,
+  getPrioritizedReaderMetadata,
 } = require('../public/email-helpers');
 
 test('deriveRecommendedAction falls back to Review', () => {
@@ -119,4 +121,22 @@ test('countEmailBuckets computes counts after search scope', () => {
   ];
   const counts = countEmailBuckets(items, { search: 'quote' });
   expect(counts.categories['Needs Reply']).toBe(1);
+});
+
+test('uses design-system category colors, not backend tag values', () => {
+  expect(getCategoryColor('Needs Reply')).toBe('#2f6f4f');
+  expect(getCategoryColor('Waiting on Others')).toBe('#8b6a2f');
+  expect(getCategoryColor('FYI')).toBe('#4d5f7a');
+});
+
+test('truncates lower-priority metadata before category and recommended action', () => {
+  const metadata = getPrioritizedReaderMetadata({
+    primaryCategory: 'Needs Reply',
+    recommendedAction: 'Review / Respond',
+    urgency: 'High',
+    categorySource: 'heuristic',
+    scoreMeta: { confidenceText: '92%' },
+  }, { maxEntries: 2 });
+
+  expect(metadata.map((entry) => entry.key)).toEqual(['category', 'recommendedAction']);
 });

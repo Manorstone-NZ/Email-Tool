@@ -82,4 +82,34 @@ describe('Email workspace contract', () => {
     expect(errorText).not.toContain('No messages match current filters');
     expect(noResultsText).toBe('No messages match current filters');
   });
+
+  test('reader metadata strip is wrap-based and constrained to two lines on desktop', () => {
+    const { createReaderMetadataStrip } = require('../../public/app.js');
+    const strip = createReaderMetadataStrip({
+      primaryCategory: 'Needs Reply',
+      recommendedAction: 'Review / Respond',
+      urgency: 'High',
+      categorySource: 'heuristic',
+      scoreMeta: { confidenceText: '92%' },
+    });
+
+    expect(strip.classList.contains('reader-meta-strip')).toBe(true);
+    expect(strip.dataset.maxLines).toBe('2');
+    expect(strip.querySelectorAll('.meta-priority-high').length).toBeGreaterThan(0);
+  });
+
+  test('reader metadata keeps category and recommended action visible before lower-priority keys', () => {
+    const { getVisibleMetadataKeys } = require('../../public/app.js');
+    const keys = getVisibleMetadataKeys({
+      primaryCategory: 'Needs Reply',
+      recommendedAction: 'Review / Respond',
+      urgency: 'High',
+      categorySource: 'heuristic',
+      scoreMeta: { confidenceText: '92%' },
+    }, { maxEntries: 2 });
+
+    expect(keys).toContain('category');
+    expect(keys).toContain('recommendedAction');
+    expect(keys).not.toContain('urgency');
+  });
 });

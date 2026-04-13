@@ -777,6 +777,38 @@ header h1 {
     margin-bottom: 10px;
 }
 
+.reader-meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    margin-bottom: 10px;
+}
+
+.meta-priority-high {
+    order: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2e3442;
+}
+
+.meta-priority-low {
+    order: 2;
+    min-width: 0;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #6a7384;
+}
+
+@media (min-width: 1100px) {
+    .reader-meta-strip[data-max-lines="2"] {
+        max-height: calc(2 * 1.35em + 6px);
+        overflow: hidden;
+    }
+}
+
 .card-body-preview {
     line-height: 1.5;
     white-space: pre-wrap;

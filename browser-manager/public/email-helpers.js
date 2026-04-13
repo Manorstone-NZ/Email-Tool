@@ -10,6 +10,11 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 const VALID_CATEGORIES = ['Needs Reply', 'Waiting on Others', 'FYI'];
+const CATEGORY_COLORS = Object.freeze({
+  'Needs Reply': '#2f6f4f',
+  'Waiting on Others': '#8b6a2f',
+  'FYI': '#4d5f7a',
+});
 
 function toLower(value) {
   return String(value || '').toLowerCase();
@@ -259,6 +264,55 @@ function warnIfLargeEmailList(items, warnFn) {
   }
 }
 
+function getCategoryColor(category) {
+  return CATEGORY_COLORS[String(category || '')] || '#4d5f7a';
+}
+
+function getPrioritizedReaderMetadata(item, options) {
+  const maxEntries = Number((options && options.maxEntries) || 4);
+  const entries = [
+    {
+      key: 'category',
+      label: 'Category',
+      value: String((item && item.primaryCategory) || 'FYI'),
+      priority: 'high',
+    },
+    {
+      key: 'recommendedAction',
+      label: 'Recommended action',
+      value: String((item && item.recommendedAction) || 'Review'),
+      priority: 'high',
+    },
+    {
+      key: 'urgency',
+      label: 'Urgency',
+      value: String((item && item.urgency) || ''),
+      priority: 'low',
+    },
+    {
+      key: 'source',
+      label: 'Source',
+      value: String((item && item.categorySource) || ''),
+      priority: 'low',
+    },
+    {
+      key: 'confidence',
+      label: 'Confidence',
+      value: String((item && item.scoreMeta && item.scoreMeta.confidenceText) || ''),
+      priority: 'low',
+    },
+  ].filter((entry) => entry.value);
+
+  entries.sort((a, b) => {
+    if (a.priority === b.priority) {
+      return 0;
+    }
+    return a.priority === 'high' ? -1 : 1;
+  });
+
+  return entries.slice(0, Math.max(maxEntries, 0));
+}
+
 const api = {
   deriveRecommendedAction,
   deriveEmailTags,
@@ -271,6 +325,8 @@ const api = {
   filterEmailItems,
   countEmailBuckets,
   warnIfLargeEmailList,
+  getCategoryColor,
+  getPrioritizedReaderMetadata,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

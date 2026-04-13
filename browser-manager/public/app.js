@@ -944,6 +944,8 @@ class DashboardClient {
       const rawEl = document.createElement('details');
       rawEl.className = 'card-raw';
 
+      const readerMetadataStrip = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
+
       const rawSummaryEl = document.createElement('summary');
       rawSummaryEl.textContent = 'Raw metadata';
 
@@ -952,7 +954,7 @@ class DashboardClient {
       rawContentEl.textContent = JSON.stringify(item, null, 2);
 
       rawEl.append(rawSummaryEl, rawContentEl);
-  expandedEl.append(bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
+  expandedEl.append(readerMetadataStrip, bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
 
       collapsedEl.addEventListener('click', () => {
         if (itemId) {
@@ -1395,6 +1397,51 @@ function resolveSelectedEmailId(currentSelectedId, visibleItems) {
   }
 
   return visibleIds.includes(currentId) ? currentId : visibleIds[0];
+}
+
+function buildReaderMetadata(item, options) {
+  if (typeof EmailHelpers !== 'undefined' && EmailHelpers.getPrioritizedReaderMetadata) {
+    return EmailHelpers.getPrioritizedReaderMetadata(item, options);
+  }
+
+  const maxEntries = Number((options && options.maxEntries) || 4);
+  const entries = [
+    { key: 'category', label: 'Category', value: String((item && item.primaryCategory) || 'FYI'), priority: 'high' },
+    { key: 'recommendedAction', label: 'Recommended action', value: String((item && item.recommendedAction) || 'Review'), priority: 'high' },
+    { key: 'urgency', label: 'Urgency', value: String((item && item.urgency) || ''), priority: 'low' },
+    { key: 'source', label: 'Source', value: String((item && item.categorySource) || ''), priority: 'low' },
+    { key: 'confidence', label: 'Confidence', value: String((item && item.scoreMeta && item.scoreMeta.confidenceText) || ''), priority: 'low' },
+  ].filter((entry) => entry.value);
+
+  entries.sort((a, b) => {
+    if (a.priority === b.priority) {
+      return 0;
+    }
+    return a.priority === 'high' ? -1 : 1;
+  });
+
+  return entries.slice(0, Math.max(maxEntries, 0));
+}
+
+function createReaderMetadataStrip(item, options) {
+  const strip = document.createElement('div');
+  strip.className = 'reader-meta-strip';
+  strip.dataset.maxLines = String((options && options.maxLines) || 2);
+
+  const metadata = buildReaderMetadata(item, options);
+  metadata.forEach((entry) => {
+    const chip = document.createElement('span');
+    chip.className = entry.priority === 'high' ? 'meta-priority-high' : 'meta-priority-low';
+    chip.dataset.key = entry.key;
+    chip.textContent = `${entry.label}: ${entry.value}`;
+    strip.appendChild(chip);
+  });
+
+  return strip;
+}
+
+function getVisibleMetadataKeys(item, options) {
+  return buildReaderMetadata(item, options).map((entry) => entry.key);
 }
 
 // Initialize dashboard on page load
@@ -1896,7 +1943,7 @@ function handleSettingsUpdated(message) {
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage, createReaderMetadataStrip, getVisibleMetadataKeys };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;
