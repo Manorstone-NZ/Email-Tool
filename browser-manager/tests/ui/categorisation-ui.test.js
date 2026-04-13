@@ -149,4 +149,12 @@ describe('Categorisation UI Components', () => {
       expect(toggleFilterValue('Vendor', '')).toBe(null);
     });
   });
+
+  describe('Email selection helper', () => {
+    test('preserves current selection when still visible', () => {
+      const { resolveSelectedEmailId } = require('../../public/app.js');
+      const next = resolveSelectedEmailId('email-2', [{ id: 'email-1' }, { id: 'email-2' }]);
+      expect(next).toBe('email-2');
+    });
+  });
 });

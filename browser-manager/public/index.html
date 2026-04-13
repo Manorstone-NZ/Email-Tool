@@ -17,8 +17,8 @@
         </aside>
 
         <main class="portal-main">
-        <section id="view-email" data-view="email">
-            <aside class="email-rail">
+        <section id="view-email" class="email-workspace" data-view="email">
+            <aside class="email-filter-rail" data-region="filter-rail">
                 <div class="rail-section">
                     <h3 class="rail-heading">Categories</h3>
                     <ul class="rail-list" id="categoryList">
@@ -45,7 +45,7 @@
                 </div>
             </aside>
 
-            <div class="email-main">
+            <div class="email-inbox-list" data-region="inbox-list">
                 <div class="email-toolbar">
                     <input type="search" id="emailSearch" placeholder="Search emails..." class="email-search-input">
                     <button type="button" id="triageRefreshBtn" class="btn btn-primary">Refresh</button>
@@ -54,6 +54,8 @@
                 <div id="triageList" class="email-list"></div>
                 <div id="emailEmptyState" class="empty-state" hidden>No emails found.</div>
             </div>
+
+            <section id="readerPane" class="email-reader-pane" data-region="reader-pane" aria-label="Email reader pane"></section>
         </section>
 
         <section id="view-logs" data-view="logs" hidden>

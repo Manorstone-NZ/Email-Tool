@@ -493,14 +493,15 @@ header h1 {
 }
 
 /* ── Email view ── */
-#view-email {
+.email-workspace {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
-    gap: 20px;
+    grid-template-columns: 260px minmax(360px, 0.9fr) minmax(420px, 1fr);
+    gap: 0;
     align-items: start;
 }
 
-.email-rail {
+.email-filter-rail {
+    width: 260px;
     background: #ffffff;
     border-radius: 10px;
     border: 1px solid #e2e6ec;
@@ -559,8 +560,18 @@ header h1 {
     font-size: 12px;
 }
 
-.email-main {
+.email-inbox-list {
+    min-width: 360px;
     min-width: 0;
+    padding: 0 16px;
+}
+
+.email-reader-pane {
+    min-width: 420px;
+    background: #ffffff;
+    border: 1px solid #e2e6ec;
+    border-radius: 10px;
+    min-height: 320px;
 }
 
 .email-toolbar {
@@ -864,12 +875,22 @@ header h1 {
         grid-template-columns: 1fr;
     }
 
-    #view-email {
+    .email-workspace {
         grid-template-columns: 1fr;
     }
 
-    .email-rail {
+    .email-filter-rail {
         position: static;
+        width: auto;
+    }
+
+    .email-inbox-list {
+        padding: 0;
+    }
+
+    .email-reader-pane {
+        min-width: 0;
+        margin-top: 12px;
     }
 
     .email-toolbar {

@@ -13,6 +13,7 @@ class DashboardClient {
       state: null,     // null means 'All', or one of 'Flagged', 'Pinned', 'Done'
       tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
     };
+    this.selectedEmailId = null;
     // Logs state (session-only, no persistence)
     this.logs = [];
     this.logsFilterSearch = '';
@@ -733,6 +734,7 @@ class DashboardClient {
     if (!listEl) return;
 
     const safeItems = Array.isArray(items) ? items : [];
+    this.selectedEmailId = resolveSelectedEmailId(this.selectedEmailId, safeItems);
 
     listEl.innerHTML = '';
 
@@ -755,6 +757,7 @@ class DashboardClient {
 
     safeItems.forEach((item) => {
       const itemId = String(item && item.id ? item.id : '');
+      const isSelected = Boolean(itemId) && itemId === this.selectedEmailId;
       const sender = String((item && item.sender) || 'Unknown sender');
       const subject = String((item && item.subject) || 'No subject');
       const recommendedAction = String((item && item.recommendedAction) || 'Review');
@@ -781,6 +784,7 @@ class DashboardClient {
       const cardEl = document.createElement('div');
       cardEl.className = 'email-card';
       cardEl.dataset.id = itemId;
+      cardEl.dataset.selected = isSelected ? 'true' : 'false';
       cardEl.dataset.expanded = 'false';
 
       const collapsedEl = document.createElement('div');
@@ -950,6 +954,13 @@ class DashboardClient {
   expandedEl.append(bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
 
       collapsedEl.addEventListener('click', () => {
+        if (itemId) {
+          this.selectedEmailId = itemId;
+          listEl.querySelectorAll('.email-card').forEach((node) => {
+            node.dataset.selected = node.dataset.id === itemId ? 'true' : 'false';
+          });
+        }
+
         const isExpanded = cardEl.dataset.expanded === 'true';
         cardEl.dataset.expanded = isExpanded ? 'false' : 'true';
         expandedEl.hidden = isExpanded;
@@ -1302,6 +1313,24 @@ function toggleFilterValue(currentValue, nextValue) {
     return null;
   }
   return currentValue === next ? null : next;
+}
+
+function resolveSelectedEmailId(currentSelectedId, visibleItems) {
+  const safeItems = Array.isArray(visibleItems) ? visibleItems : [];
+  const visibleIds = safeItems
+    .map((item) => String(item && item.id ? item.id : ''))
+    .filter(Boolean);
+
+  if (!visibleIds.length) {
+    return null;
+  }
+
+  const currentId = currentSelectedId ? String(currentSelectedId) : null;
+  if (!currentId) {
+    return visibleIds[0];
+  }
+
+  return visibleIds.includes(currentId) ? currentId : visibleIds[0];
 }
 
 // Initialize dashboard on page load
@@ -1803,7 +1832,7 @@ function handleSettingsUpdated(message) {
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;
