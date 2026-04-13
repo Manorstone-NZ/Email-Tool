@@ -1246,6 +1246,10 @@ function normalizeRoute(hash) {
   return ['email', 'logs', 'settings'].includes(route) ? route : 'email';
 }
 
+function resolveRoute(hash) {
+  return normalizeRoute(hash);
+}
+
 function applyRoute(route) {
   document.body.dataset.route = route;
   document.querySelectorAll('[data-view]').forEach((node) => {
@@ -1449,16 +1453,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('hashchange', () => {
-    const route = normalizeRoute(window.location.hash);
+    const route = resolveRoute(window.location.hash);
     applyRoute(route);
     syncRouteHash(route);
     closeSidebarOnCompactViewport();
+    if (typeof PortalState !== 'undefined') {
+      PortalState.setActiveRoute(route);
+    }
   });
 
   // Initial dispatch: apply route immediately, then normalise URL if needed
-  const startRoute = normalizeRoute(window.location.hash);
+  const startRoute = resolveRoute(window.location.hash);
   applyRoute(startRoute);
   syncRouteHash(startRoute);
+  if (typeof PortalState !== 'undefined') {
+    PortalState.setActiveRoute(startRoute);
+  }
 });
 
 // ──────────────────────────────────────────────────────────────────────────

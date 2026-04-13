@@ -15,6 +15,37 @@ function normalizeRoute(hash) {
   return constants.ROUTES.includes(route) ? route : 'email';
 }
 
+// ── Session route state (in-memory, not persisted) ─────────────────────────
+const routeSession = {
+  active: 'email',
+  settingsTab: 'general',
+  categorizationTab: 'general',
+};
+
+function setActiveRoute(route) {
+  routeSession.active = constants.ROUTES.includes(route) ? route : 'email';
+}
+
+function getActiveRoute() {
+  return routeSession.active;
+}
+
+function setSettingsTab(tab) {
+  routeSession.settingsTab = String(tab || 'general');
+}
+
+function getSettingsTab() {
+  return routeSession.settingsTab;
+}
+
+function setCategorizationTab(tab) {
+  routeSession.categorizationTab = String(tab || 'general');
+}
+
+function getCategorizationTab() {
+  return routeSession.categorizationTab;
+}
+
 function readEmailUiState() {
   if (typeof localStorage === 'undefined') {
     return {};
@@ -83,6 +114,12 @@ const api = {
   readEmailUiState,
   writeEmailUiState,
   mergeEmailUiState,
+  setActiveRoute,
+  getActiveRoute,
+  setSettingsTab,
+  getSettingsTab,
+  setCategorizationTab,
+  getCategorizationTab,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

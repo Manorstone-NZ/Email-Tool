@@ -44,3 +44,37 @@ test('writeEmailUiState does not throw when localStorage setItem fails', () => {
   global.localStorage = originalLocalStorage;
   warnSpy.mockRestore();
 });
+
+describe('route session state', () => {
+  let state;
+
+  beforeEach(() => {
+    jest.resetModules();
+    state = require('../public/portal-state');
+  });
+
+  test('active route defaults to email', () => {
+    expect(state.getActiveRoute()).toBe('email');
+  });
+
+  test('setActiveRoute updates active route', () => {
+    state.setActiveRoute('settings');
+    expect(state.getActiveRoute()).toBe('settings');
+  });
+
+  test('setActiveRoute falls back to email for unknown routes', () => {
+    state.setActiveRoute('unknown');
+    expect(state.getActiveRoute()).toBe('email');
+  });
+
+  test('settings tab defaults to general', () => {
+    expect(state.getSettingsTab()).toBe('general');
+  });
+
+  test('setSettingsTab persists across route changes', () => {
+    state.setSettingsTab('categorization');
+    state.setActiveRoute('email');
+    state.setActiveRoute('settings');
+    expect(state.getSettingsTab()).toBe('categorization');
+  });
+});

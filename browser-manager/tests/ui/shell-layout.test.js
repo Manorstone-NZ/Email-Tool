@@ -36,6 +36,13 @@ describe('Shell layout route contract', () => {
     const labels = getSidebarRouteLabels();
     expect(labels).toEqual(['Email', 'Settings', 'Logs']);
   });
+
+  test('respects valid hash on load', async () => {
+    window.location.hash = '#settings';
+    await bootstrapApp();
+    expect(getActiveRoute()).toBe('settings');
+    expect(document.body.dataset.route).toBe('settings');
+  });
 });
 
 async function bootstrapApp() {
