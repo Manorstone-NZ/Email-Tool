@@ -1587,19 +1587,36 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Route controller ──────────────────────────────────────────────────────
   document.querySelectorAll('[data-route]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      const nextRoute = btn.dataset.route;
+      if (!guardUnsavedSettingsNavigation(nextRoute)) {
+        return;
+      }
       window.location.hash = btn.dataset.route;
       closeSidebarOnCompactViewport();
     });
   });
 
   window.addEventListener('hashchange', () => {
+    const currentRoute = document.body.dataset.route || 'email';
     const route = resolveRoute(window.location.hash);
+    if (currentRoute === 'settings' && route !== 'settings' && !guardUnsavedSettingsNavigation(route)) {
+      syncRouteHash(currentRoute);
+      return;
+    }
     applyRoute(route);
     syncRouteHash(route);
     closeSidebarOnCompactViewport();
     if (typeof PortalState !== 'undefined') {
       PortalState.setActiveRoute(route);
     }
+  });
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!isSettingsDirty()) {
+      return;
+    }
+    event.preventDefault();
+    event.returnValue = '';
   });
 
   // Initial dispatch: apply route immediately, then normalise URL if needed
@@ -1695,30 +1712,153 @@ function renderCategoryBadge(item) {
   return span;
 }
 
-// Settings Panel Renderer
-async function renderSettingsPanel(container, api) {
+const settingsPanelState = {
+  dirty: false,
+  saving: false,
+  currentSettings: null,
+  api: null,
+  container: null,
+};
+
+function isSettingsDirty() {
+  return Boolean(settingsPanelState.dirty);
+}
+
+function setSettingsDirty(next) {
+  settingsPanelState.dirty = Boolean(next);
+  if (typeof PortalState !== 'undefined' && PortalState.setSettingsDirty) {
+    PortalState.setSettingsDirty(settingsPanelState.dirty);
+  }
+
+  if (!settingsPanelState.container) {
+    return;
+  }
+
+  const indicator = settingsPanelState.container.querySelector('[data-settings-dirty-indicator]');
+  if (indicator) {
+    indicator.hidden = !settingsPanelState.dirty;
+  }
+}
+
+function markSettingsDirty() {
+  setSettingsDirty(true);
+}
+
+function guardUnsavedSettingsNavigation(nextRoute, confirmFn) {
+  if (!isSettingsDirty() || nextRoute === 'settings') {
+    return true;
+  }
+
+  const askConfirm = typeof confirmFn === 'function' ? confirmFn : window.confirm;
+  return askConfirm('You have unsaved changes. Leave settings and discard them?');
+}
+
+function collectCategorizationSettingsFromDom(container, currentSettings) {
+  const settings = {
+    topicLabelsGloballyEnabled: container.querySelector('#topicLabelsGloballyEnabled')?.checked || false,
+    categories: {},
+    topicLabels: Array.isArray(currentSettings?.topicLabels) ? currentSettings.topicLabels.slice() : [],
+    customRules: Array.isArray(currentSettings?.customRules) ? currentSettings.customRules.slice() : [],
+  };
+
+  for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
+    settings.categories[cat] = {
+      enabled: container.querySelector(`input[name="${cat}-enabled"]`)?.checked || false,
+      targetFolderName: container.querySelector(`input[name="${cat}-targetFolderName"]`)?.value || '',
+      outlookCategoryTag: container.querySelector(`input[name="${cat}-outlookCategoryTag"]`)?.value || '',
+      topicLabelsEnabled: container.querySelector(`input[name="${cat}-topicLabels"]`)?.checked || false,
+    };
+  }
+
+  return settings;
+}
+
+async function persistCategorizationSettings() {
+  if (!settingsPanelState.api || !settingsPanelState.container || settingsPanelState.saving) {
+    return;
+  }
+
+  const actionBtn = settingsPanelState.container.querySelector('[data-settings-save-button]');
+  const statusEl = settingsPanelState.container.querySelector('[data-settings-save-status]');
+  settingsPanelState.saving = true;
+  if (actionBtn) {
+    actionBtn.disabled = true;
+  }
+  if (statusEl) {
+    statusEl.textContent = 'Saving...';
+  }
+
   try {
-    const settings = await api.getSettings();
-    
-    // Clear container
+    const nextSettings = collectCategorizationSettingsFromDom(settingsPanelState.container, settingsPanelState.currentSettings);
+    await settingsPanelState.api.putSettings(nextSettings);
+    settingsPanelState.currentSettings = nextSettings;
+    setSettingsDirty(false);
+    if (statusEl) {
+      statusEl.textContent = 'Saved';
+    }
+  } catch (error) {
+    if (statusEl) {
+      statusEl.textContent = `Error: ${error.message}`;
+    }
+  } finally {
+    settingsPanelState.saving = false;
+    if (actionBtn) {
+      actionBtn.disabled = false;
+    }
+  }
+}
+
+// Settings Panel Renderer
+async function renderSettingsPanel(container, api, providedSettings) {
+  try {
+    const settings = providedSettings || await api.getSettings();
+    settingsPanelState.currentSettings = settings;
+    settingsPanelState.api = api;
+    settingsPanelState.container = container;
+
     container.innerHTML = '';
 
-    // Global settings
+    const tabBar = document.createElement('div');
+    tabBar.className = 'settings-tabs';
+    tabBar.innerHTML = `
+      <button type="button" class="settings-tab-button is-active" data-settings-tab="general">General</button>
+      <button type="button" class="settings-tab-button" data-settings-tab="categorization">Categorization</button>
+    `;
+    container.appendChild(tabBar);
+
+    const categorizationPanel = document.createElement('section');
+    categorizationPanel.className = 'categorization-panel settings-tab-panel';
+    categorizationPanel.dataset.settingsTabPanel = 'categorization';
+
+    const dirtyIndicator = document.createElement('p');
+    dirtyIndicator.textContent = 'Unsaved changes';
+    dirtyIndicator.className = 'settings-dirty-indicator';
+    dirtyIndicator.dataset.settingsDirtyIndicator = 'true';
+    dirtyIndicator.hidden = !isSettingsDirty();
+    categorizationPanel.appendChild(dirtyIndicator);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'settings-actions';
+    actionRow.innerHTML = `
+      <button type="button" class="btn btn-primary" data-settings-save-button>Update preferences</button>
+      <span class="settings-save-status" data-settings-save-status></span>
+    `;
+    categorizationPanel.appendChild(actionRow);
+
     const globalSection = document.createElement('section');
     globalSection.className = 'global-settings';
     const globalToggle = document.createElement('input');
     globalToggle.type = 'checkbox';
     globalToggle.id = 'topicLabelsGloballyEnabled';
-    globalToggle.checked = settings.topicLabelsGloballyEnabled;
-    globalToggle.addEventListener('change', () => updateSettings(api, container, settings));
+    globalToggle.checked = Boolean(settings.topicLabelsGloballyEnabled);
+    globalToggle.addEventListener('change', markSettingsDirty);
     globalSection.appendChild(globalToggle);
     const label = document.createElement('label');
     label.htmlFor = 'topicLabelsGloballyEnabled';
     label.textContent = 'Enable Topic Labels Globally';
     globalSection.appendChild(label);
-    container.appendChild(globalSection);
+    categorizationPanel.appendChild(globalSection);
 
-    // Category cards
     const cardsSection = document.createElement('section');
     cardsSection.className = 'category-cards';
     const cardsTitle = document.createElement('h4');
@@ -1727,12 +1867,12 @@ async function renderSettingsPanel(container, api) {
     const cardsContainer = document.createElement('div');
     cardsContainer.className = 'cards-container';
     cardsContainer.id = 'category-cards';
-    
+
     for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
       const card = document.createElement('div');
       card.className = 'category-card';
       const catSettings = settings.categories[cat];
-      
+
       card.innerHTML = `
         <h3>${cat}</h3>
         <label>
@@ -1752,19 +1892,17 @@ async function renderSettingsPanel(container, api) {
           Enable Topic Labels
         </label>
       `;
-      
-      const inputs = card.querySelectorAll('input');
-      inputs.forEach(input => {
-        input.addEventListener('change', () => updateSettings(api, container, settings));
+
+      card.querySelectorAll('input').forEach((input) => {
+        input.addEventListener('change', markSettingsDirty);
       });
-      
+
       cardsContainer.appendChild(card);
     }
-    
-    cardsSection.appendChild(cardsContainer);
-    container.appendChild(cardsSection);
 
-    // Topic labels
+    cardsSection.appendChild(cardsContainer);
+    categorizationPanel.appendChild(cardsSection);
+
     const labelsSection = document.createElement('section');
     labelsSection.className = 'topic-labels-section';
     const labelsTitle = document.createElement('h4');
@@ -1777,58 +1915,33 @@ async function renderSettingsPanel(container, api) {
     const labelsList = document.createElement('ul');
     labelsList.className = 'topic-labels-list';
     labelsList.id = 'topic-labels-list';
-    
-    for (const label of settings.topicLabels) {
+
+    for (const topicLabel of settings.topicLabels) {
       const li = document.createElement('li');
       li.className = 'label-item';
       li.innerHTML = `
-        <span>${label.key} → ${label.mapsToCategory} (${label.patterns.join(', ')})</span>
-        <button class="delete-button" data-id="${label.id}">Delete</button>
+        <span>${topicLabel.key} → ${topicLabel.mapsToCategory} (${topicLabel.patterns.join(', ')})</span>
+        <button class="delete-button" data-id="${topicLabel.id}">Delete</button>
       `;
       li.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
-        settings.topicLabels = settings.topicLabels.filter(l => l.id !== label.id);
-        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
+        settings.topicLabels = settings.topicLabels.filter((entry) => entry.id !== topicLabel.id);
+        markSettingsDirty();
+        renderSettingsPanel(container, api, settings);
       });
       labelsList.appendChild(li);
     }
 
     addLabelBtn.addEventListener('click', () => {
-      if (labelsList.querySelector('.new-label-form')) return;
-      const li = document.createElement('li');
-      li.className = 'label-item new-label-form';
-      li.innerHTML = `
-        <input type="text" class="new-label-key" placeholder="Label key (e.g. billing)" />
-        <select class="new-label-category">
-          <option value="todo">todo</option>
-          <option value="fyi">fyi</option>
-          <option value="to_follow_up">to_follow_up</option>
-          <option value="notification">notification</option>
-          <option value="marketing">marketing</option>
-        </select>
-        <input type="text" class="new-label-patterns" placeholder="Patterns, comma-separated (e.g. invoice,billing)" />
-        <button class="save-new-label-btn">Save</button>
-        <button class="cancel-new-label-btn">Cancel</button>
-      `;
-      li.querySelector('.cancel-new-label-btn').addEventListener('click', () => li.remove());
-      li.querySelector('.save-new-label-btn').addEventListener('click', () => {
-        const key = li.querySelector('.new-label-key').value.trim();
-        const mapsToCategory = li.querySelector('.new-label-category').value;
-        const patterns = li.querySelector('.new-label-patterns').value.split(',').map(p => p.trim()).filter(Boolean);
-        if (!key || patterns.length === 0) {
-          alert('Label key and at least one pattern are required.');
-          return;
-        }
-        settings.topicLabels.push({ id: `label_${Date.now()}`, key, mapsToCategory, patterns, enabled: true });
-        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
-      });
-      labelsList.appendChild(li);
+      const id = `label_${Date.now()}`;
+      settings.topicLabels.push({ id, key: 'new-label', mapsToCategory: 'todo', patterns: ['example'], enabled: true });
+      markSettingsDirty();
+      renderSettingsPanel(container, api, settings);
     });
 
     labelsSection.appendChild(labelsList);
-    container.appendChild(labelsSection);
+    categorizationPanel.appendChild(labelsSection);
 
-    // Custom rules
     const rulesSection = document.createElement('section');
     rulesSection.className = 'custom-rules-section';
     const rulesTitle = document.createElement('h4');
@@ -1841,7 +1954,7 @@ async function renderSettingsPanel(container, api) {
     const rulesList = document.createElement('ul');
     rulesList.className = 'custom-rules-list';
     rulesList.id = 'custom-rules-list';
-    
+
     for (const rule of settings.customRules) {
       const li = document.createElement('li');
       li.className = 'rule-item';
@@ -1851,53 +1964,35 @@ async function renderSettingsPanel(container, api) {
       `;
       li.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
-        settings.customRules = settings.customRules.filter(r => r.id !== rule.id);
-        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
+        settings.customRules = settings.customRules.filter((entry) => entry.id !== rule.id);
+        markSettingsDirty();
+        renderSettingsPanel(container, api, settings);
       });
       rulesList.appendChild(li);
     }
 
     addRuleBtn.addEventListener('click', () => {
-      if (rulesList.querySelector('.new-rule-form')) return;
-      const li = document.createElement('li');
-      li.className = 'rule-item new-rule-form';
-      li.innerHTML = `
-        <select class="new-rule-type">
-          <option value="sender_email">sender_email</option>
-          <option value="sender_domain">sender_domain</option>
-          <option value="subject_contains">subject_contains</option>
-          <option value="subject_exact">subject_exact</option>
-        </select>
-        <input type="text" class="new-rule-value" placeholder="Value (e.g. noreply@example.com)" />
-        <select class="new-rule-action">
-          <option value="todo">todo</option>
-          <option value="fyi">fyi</option>
-          <option value="to_follow_up">to_follow_up</option>
-          <option value="notification">notification</option>
-          <option value="marketing">marketing</option>
-          <option value="skip_automation">skip_automation</option>
-        </select>
-        <button class="save-new-rule-btn">Save</button>
-        <button class="cancel-new-rule-btn">Cancel</button>
-      `;
-      li.querySelector('.cancel-new-rule-btn').addEventListener('click', () => li.remove());
-      li.querySelector('.save-new-rule-btn').addEventListener('click', () => {
-        const type = li.querySelector('.new-rule-type').value;
-        const value = li.querySelector('.new-rule-value').value.trim();
-        const action = li.querySelector('.new-rule-action').value;
-        if (!value) {
-          alert('Value is required.');
-          return;
-        }
-        settings.customRules.push({ id: `rule_${Date.now()}`, type, value, action, enabled: true });
-        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
-      });
-      rulesList.appendChild(li);
+      const id = `rule_${Date.now()}`;
+      settings.customRules.push({ id, enabled: true, type: 'sender_email', value: 'new@example.com', action: 'todo' });
+      markSettingsDirty();
+      renderSettingsPanel(container, api, settings);
     });
 
     rulesSection.appendChild(rulesList);
-    container.appendChild(rulesSection);
+    categorizationPanel.appendChild(rulesSection);
 
+    container.appendChild(categorizationPanel);
+
+    const saveButton = container.querySelector('[data-settings-save-button]');
+    if (saveButton) {
+      saveButton.addEventListener('click', () => {
+        persistCategorizationSettings();
+      });
+    }
+
+    if (!providedSettings) {
+      setSettingsDirty(false);
+    }
   } catch (error) {
     console.error('[renderSettingsPanel] Error:', error);
     container.innerHTML = `<p style="color: red;">Error loading settings: ${error.message}</p>`;
@@ -1905,45 +2000,34 @@ async function renderSettingsPanel(container, api) {
 }
 
 async function updateSettings(api, container, currentSettings) {
-  // Collect current settings from form
-  const settings = {
-    topicLabelsGloballyEnabled: container.querySelector('#topicLabelsGloballyEnabled').checked,
-    categories: {},
-    topicLabels: currentSettings.topicLabels || [],
-    customRules: currentSettings.customRules || [],
-  };
-
-  for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
-    settings.categories[cat] = {
-      enabled: container.querySelector(`input[name="${cat}-enabled"]`).checked,
-      targetFolderName: container.querySelector(`input[name="${cat}-targetFolderName"]`).value,
-      outlookCategoryTag: container.querySelector(`input[name="${cat}-outlookCategoryTag"]`).value,
-      topicLabelsEnabled: container.querySelector(`input[name="${cat}-topicLabels"]`).checked,
-    };
-  }
-
+  const settings = collectCategorizationSettingsFromDom(container, currentSettings);
   await api.putSettings(settings);
 }
 
 function handleSettingsUpdated(message) {
-  if (message.key === 'categorisation') {
-    const panel = document.getElementById('settings-panel');
-    if (panel) {
-      renderSettingsPanel(panel, {
-        getSettings: () => Promise.resolve(message.settings),
-        putSettings: (settings) => fetch('/api/settings/categorisation', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings)
-        }).then(r => r.json())
-      });
-    }
+  if (message.key !== 'categorisation') {
+    return;
+  }
+  if (isSettingsDirty()) {
+    return;
+  }
+
+  const panel = document.getElementById('settings-panel');
+  if (panel) {
+    renderSettingsPanel(panel, {
+      getSettings: () => Promise.resolve(message.settings),
+      putSettings: (settings) => fetch('/api/settings/categorisation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      }).then(r => r.json())
+    }, message.settings);
   }
 }
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage, createReaderMetadataStrip, getVisibleMetadataKeys };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage, createReaderMetadataStrip, getVisibleMetadataKeys, guardUnsavedSettingsNavigation, isSettingsDirty, setSettingsDirty };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;

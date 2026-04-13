@@ -104,10 +104,11 @@ describe('Settings Panel UI', () => {
   });
 
   describe('Category Card Interactions', () => {
-    test('toggling category enabled/disabled sends update', async () => {
+    test('does not persist setting toggle changes until Update preferences', async () => {
       const { renderSettingsPanel } = require('../../public/app.js');
 
       await renderSettingsPanel(container, mockApi);
+      mockApi.putSettings.mockClear();
 
       const fyiCard = Array.from(container.querySelectorAll('.category-card')).find(c => c.textContent.includes('fyi'));
       const checkbox = fyiCard.querySelector('input[type="checkbox"][name*="enabled"]');
@@ -115,26 +116,29 @@ describe('Settings Panel UI', () => {
       checkbox.checked = true;
       checkbox.dispatchEvent(new Event('change'));
 
-      // Wait for async update
-      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockApi.putSettings).not.toHaveBeenCalled();
+
+      const updateBtn = container.querySelector('[data-settings-save-button]');
+      updateBtn.click();
+      await new Promise(resolve => setTimeout(resolve, 20));
 
       expect(mockApi.putSettings).toHaveBeenCalled();
     });
 
-    test('changing folder name sends update', async () => {
+    test('shows persistent unsaved-changes indicator when dirty', async () => {
       const { renderSettingsPanel } = require('../../public/app.js');
 
       await renderSettingsPanel(container, mockApi);
+      const indicator = container.querySelector('[data-settings-dirty-indicator]');
+      expect(indicator.hidden).toBe(true);
 
       const todoCard = Array.from(container.querySelectorAll('.category-card')).find(c => c.textContent.includes('todo'));
-      const folderInput = todoCard.querySelector('input[name*="targetFolderName"]');
+      const checkbox = todoCard.querySelector('input[type="checkbox"][name*="enabled"]');
+      checkbox.checked = !checkbox.checked;
+      checkbox.dispatchEvent(new Event('change'));
 
-      folderInput.value = 'NewTodoFolder';
-      folderInput.dispatchEvent(new Event('change'));
-
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      expect(mockApi.putSettings).toHaveBeenCalled();
+      expect(indicator.hidden).toBe(false);
+      expect(indicator.textContent).toContain('Unsaved changes');
     });
   });
 
@@ -152,11 +156,14 @@ describe('Settings Panel UI', () => {
       const { renderSettingsPanel } = require('../../public/app.js');
 
       await renderSettingsPanel(container, mockApi);
+      mockApi.putSettings.mockClear();
 
       const labelItem = container.querySelector('.label-item');
       const deleteBtn = labelItem.querySelector('.delete-button');
 
       deleteBtn.click();
+      const updateBtn = container.querySelector('[data-settings-save-button]');
+      updateBtn.click();
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -180,11 +187,14 @@ describe('Settings Panel UI', () => {
       const { renderSettingsPanel } = require('../../public/app.js');
 
       await renderSettingsPanel(container, mockApi);
+      mockApi.putSettings.mockClear();
 
       const ruleItem = container.querySelector('.rule-item');
       const deleteBtn = ruleItem.querySelector('.delete-button');
 
       deleteBtn.click();
+      const updateBtn = container.querySelector('[data-settings-save-button]');
+      updateBtn.click();
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -195,23 +205,80 @@ describe('Settings Panel UI', () => {
   });
 
   describe('WebSocket Updates', () => {
-    test('handleSettingsUpdated refreshes panel on message', async () => {
-      const { renderSettingsPanel, handleSettingsUpdated } = require('../../public/app.js');
+    test('ignores websocket settings_updated while settings form is dirty', async () => {
+      const { renderSettingsPanel, handleSettingsUpdated, isSettingsDirty } = require('../../public/app.js');
 
       await renderSettingsPanel(container, mockApi);
+      const globalToggle = container.querySelector('#topicLabelsGloballyEnabled');
+      const initialValue = globalToggle.checked;
 
-      const newSettings = {
-        topicLabelsGloballyEnabled: false,
-        categories: { ...mockApi.getSettings() },
+      globalToggle.checked = !initialValue;
+      globalToggle.dispatchEvent(new Event('change'));
+      expect(isSettingsDirty()).toBe(true);
+
+      const incoming = {
+        topicLabelsGloballyEnabled: initialValue,
+        categories: {
+          todo: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: false },
+          fyi: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: false },
+          to_follow_up: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: false },
+          notification: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: false },
+          marketing: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: false },
+        },
         topicLabels: [],
         customRules: [],
       };
 
-      handleSettingsUpdated({ settings: newSettings });
+      handleSettingsUpdated({ key: 'categorisation', settings: incoming });
+      expect(container.querySelector('#topicLabelsGloballyEnabled').checked).toBe(!initialValue);
+    });
+
+    test('navigating away while dirty does not silently discard changes', async () => {
+      const { renderSettingsPanel, guardUnsavedSettingsNavigation } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+      const globalToggle = container.querySelector('#topicLabelsGloballyEnabled');
+      globalToggle.checked = !globalToggle.checked;
+      globalToggle.dispatchEvent(new Event('change'));
+
+      const allowed = guardUnsavedSettingsNavigation('email', () => false);
+      expect(allowed).toBe(false);
+    });
+
+    test('settings page does not create nested scroll regions', async () => {
+      const { renderSettingsPanel } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+      const nestedScrollables = Array.from(container.querySelectorAll('*')).filter((node) => {
+        const style = (node.getAttribute('style') || '').toLowerCase();
+        return style.includes('overflow:auto') || style.includes('overflow-y:auto');
+      });
+      expect(nestedScrollables).toHaveLength(0);
+    });
+
+    test('handleSettingsUpdated refreshes panel on message when clean', async () => {
+      const { renderSettingsPanel, handleSettingsUpdated, setSettingsDirty } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+      setSettingsDirty(false);
+
+      const newSettings = {
+        topicLabelsGloballyEnabled: false,
+        categories: {
+          todo: { enabled: true, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
+          fyi: { enabled: true, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
+          to_follow_up: { enabled: true, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
+          notification: { enabled: true, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
+          marketing: { enabled: true, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
+        },
+        topicLabels: [],
+        customRules: [],
+      };
+
+      handleSettingsUpdated({ key: 'categorisation', settings: newSettings });
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      // Panel should re-render with new settings
       expect(container.querySelector('.global-settings')).toBeTruthy();
     });
   });

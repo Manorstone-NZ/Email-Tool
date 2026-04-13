@@ -77,4 +77,15 @@ describe('route session state', () => {
     state.setActiveRoute('settings');
     expect(state.getSettingsTab()).toBe('categorization');
   });
+
+  test('settings dirty defaults to false', () => {
+    expect(state.isSettingsDirty()).toBe(false);
+  });
+
+  test('setSettingsDirty toggles dirty state', () => {
+    state.setSettingsDirty(true);
+    expect(state.isSettingsDirty()).toBe(true);
+    state.setSettingsDirty(false);
+    expect(state.isSettingsDirty()).toBe(false);
+  });
 });

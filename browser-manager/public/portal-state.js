@@ -20,6 +20,7 @@ const routeSession = {
   active: 'email',
   settingsTab: 'general',
   categorizationTab: 'general',
+  settingsDirty: false,
 };
 
 function setActiveRoute(route) {
@@ -44,6 +45,14 @@ function setCategorizationTab(tab) {
 
 function getCategorizationTab() {
   return routeSession.categorizationTab;
+}
+
+function setSettingsDirty(value) {
+  routeSession.settingsDirty = Boolean(value);
+}
+
+function isSettingsDirty() {
+  return Boolean(routeSession.settingsDirty);
 }
 
 function readEmailUiState() {
@@ -120,6 +129,8 @@ const api = {
   getSettingsTab,
   setCategorizationTab,
   getCategorizationTab,
+  setSettingsDirty,
+  isSettingsDirty,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
