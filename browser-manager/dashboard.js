@@ -121,6 +121,7 @@ class DashboardServer {
     this.clients = new Set();
     this.eventLogger = null;
     this.manager = null;
+    this.categorizationSettings = null;
   }
 
   setEventLogger(eventLogger) {
@@ -129,6 +130,10 @@ class DashboardServer {
 
   setManager(manager) {
     this.manager = manager;
+  }
+
+  setCategorizationSettings(categorizationSettings) {
+    this.categorizationSettings = categorizationSettings;
   }
 
   setup() {
@@ -143,6 +148,17 @@ class DashboardServer {
     // Serve static files
     this.app.use(express.static(path.join(__dirname, 'public')));
     this.app.use(express.json());
+
+    if (this.categorizationSettings) {
+      const dashboardRouter = new Dashboard({
+        emailTriage: this.manager && this.manager.emailTriage,
+        broadcast: (this.manager && this.manager.broadcast) || this.broadcast.bind(this),
+        setCategorizationSettings: this.manager && this.manager.setCategorizationSettings
+          ? this.manager.setCategorizationSettings.bind(this.manager)
+          : undefined,
+      }, this.categorizationSettings);
+      this.app.use('/', dashboardRouter.router);
+    }
 
     // REST API endpoint for events
     this.app.get('/api/events', (req, res) => {
@@ -437,6 +453,10 @@ class Dashboard {
         
         // Notify triage instance
         this.manager?.emailTriage?.setCategorizationSettings?.(validated);
+
+        if (this.manager?.setCategorizationSettings) {
+          this.manager.setCategorizationSettings(validated);
+        }
         
         // Broadcast to all connected clients
         this.manager?.broadcast?.({

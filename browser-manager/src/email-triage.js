@@ -1,13 +1,45 @@
 const { EventEmitter } = require('events');
 
+function normalizeCategorizationSettings(categorizationSettings) {
+  if (categorizationSettings && typeof categorizationSettings.getSettings === 'function') {
+    return categorizationSettings;
+  }
+
+  const settings = categorizationSettings && typeof categorizationSettings === 'object'
+    ? categorizationSettings
+    : {};
+
+  return {
+    getSettings() {
+      return settings;
+    },
+  };
+}
+
 class EmailTriage extends EventEmitter {
   constructor(graphAPI, mailActionService, categorizationSettings, folderCache) {
     super();
     this.graphAPI = graphAPI;
     this.mailActionService = mailActionService;
-    this.categorizationSettings = categorizationSettings;
+    this.categorizationSettings = normalizeCategorizationSettings(categorizationSettings);
     this.folderCache = folderCache;
     this.lastTriageResult = [];
+    this.lastRunMeta = {
+      totalExtracted: 0,
+      minScore: null,
+    };
+  }
+
+  setCategorizationSettings(categorizationSettings) {
+    this.categorizationSettings = normalizeCategorizationSettings(categorizationSettings);
+  }
+
+  getLastResult() {
+    return this.lastTriageResult;
+  }
+
+  getLastRunMeta() {
+    return this.lastRunMeta;
   }
 
   async run(onlyMailbox, options = {}) {
@@ -23,6 +55,7 @@ class EmailTriage extends EventEmitter {
       emails = await this.graphAPI.getEmails(onlyMailbox);
     } catch (error) {
       console.error('[EmailTriage.run] Failed to fetch emails:', error.message);
+      this.emit('triage-error', { error: error.message });
       return [];
     }
 
@@ -107,15 +140,39 @@ class EmailTriage extends EventEmitter {
       process.nextTick(() => this.emit('triageItem', item));
     }
 
+    this.lastTriageResult = filtered;
+    this.lastRunMeta = {
+      totalExtracted: emails.length,
+      minScore: options.minScore ?? null,
+    };
+
+    this.emit('triage-complete', {
+      totalExtracted: emails.length,
+      actionableCount: filtered.length,
+      topItems: filtered.slice(0, 5).map((item) => ({
+        email: item.email,
+        score: item.score,
+        action: item.recommendedAction,
+      })),
+    });
+
     return filtered;
   }
 
   _buildTriageItem(email, decision, scoring, actionResult) {
+    const normalizedEmail = {
+      ...email,
+      sender: email.sender || email.senderEmail || '',
+      body: email.body || email.preview || '',
+      category: decision?.category || null,
+    };
+
     return {
       id: `${email.messageId}-${Date.now()}`,
       emailId: email.emailId,
       messageId: email.messageId,
       threadId: email.threadId,
+      email: normalizedEmail,
       sender: email.senderEmail,
       subject: email.subject,
       preview: email.preview,

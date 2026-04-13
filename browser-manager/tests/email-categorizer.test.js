@@ -30,11 +30,11 @@ describe('email-categorizer', () => {
       expect(result.reasons).toContain('Matched custom rule: sender_email=boss@example.com');
     });
 
-    test('sender_domain match (domain extracted from email)', () => {
+    test('sender_domain match (uses senderDomain field)', () => {
       const settings = emptySettings();
       settings.customRules = [{ id: 'r2', enabled: true, type: 'sender_domain', value: 'example.com', action: 'fyi' }];
       const result = categorize(
-        { senderEmail: 'anyone@example.com', subject: 'News', preview: '', isReply: false, isNotification: false },
+        { senderEmail: 'anyone@other.com', senderDomain: 'example.com', subject: 'News', preview: '', isReply: false, isNotification: false },
         settings
       );
       expect(result.category).toBe('fyi');
@@ -77,12 +77,26 @@ describe('email-categorizer', () => {
       const settings = emptySettings();
       settings.customRules = [{ id: 'r6', enabled: true, type: 'sender_email', value: 'vip@example.com', action: 'skip_automation' }];
       const result = categorize(
-        { senderEmail: 'vip@example.com', subject: 'Confidential', preview: '', isReply: false, isNotification: false },
+        { senderEmail: 'vip@example.com', subject: 'Please review this today', preview: '', hasUserReplyInThread: false, isNotification: false },
         settings
       );
       expect(result.skipAutomation).toBe(true);
+      expect(result.category).toBe('todo');
+      expect(result.source).toBe('heuristic');
+      expect(result.matchedRuleId).toBe('r6');
+    });
+
+    test('sender_domain uses email.senderDomain field, not senderEmail parsing', () => {
+      const settings = emptySettings();
+      settings.customRules = [{ id: 'r7', enabled: true, type: 'sender_domain', value: 'alerts.example.com', action: 'notification' }];
+      const result = categorize(
+        { senderEmail: 'someone@other-domain.com', senderDomain: 'alerts.example.com', subject: 'Status', preview: '' },
+        settings
+      );
+
       expect(result.source).toBe('custom_rule');
-      expect(result.category).toBe('fyi'); // default fallback
+      expect(result.category).toBe('notification');
+      expect(result.matchedRuleId).toBe('r7');
     });
 
     test('first matching rule wins (rule order matters)', () => {
@@ -101,25 +115,48 @@ describe('email-categorizer', () => {
   });
 
   describe('reply transition (2nd priority)', () => {
-    test('isReply=true categorizes to to_follow_up', () => {
+    test('hasUserReplyInThread=true promotes base todo to to_follow_up', () => {
       const settings = emptySettings();
       const result = categorize(
-        { senderEmail: 'user@example.com', subject: 'RE: Something', preview: '', isReply: true, isNotification: false },
+        {
+          senderEmail: 'user@example.com',
+          senderDomain: 'example.com',
+          subject: 'Can you approve this?',
+          preview: '',
+          hasUserReplyInThread: true,
+          isNotification: false,
+        },
         settings
       );
       expect(result.category).toBe('to_follow_up');
       expect(result.source).toBe('reply_transition');
-      expect(result.confidence).toBe(1.0);
-      expect(result.reasons).toContain('Email is a reply');
+      expect(result.confidence).toBeCloseTo(0.95, 2);
     });
 
-    test('isReply=false does not trigger reply transition', () => {
+    test('reply transition does not override non-todo topic label', () => {
       const settings = emptySettings();
+      settings.topicLabels = [
+        {
+          id: 'l-notify',
+          key: 'billing',
+          patterns: ['invoice'],
+          mapsToCategory: 'notification',
+          enabled: true,
+        }
+      ];
       const result = categorize(
-        { senderEmail: 'user@example.com', subject: 'Something', preview: '', isReply: false, isNotification: false },
+        {
+          senderEmail: 'alerts@example.com',
+          senderDomain: 'example.com',
+          subject: 'Invoice available',
+          preview: '',
+          hasUserReplyInThread: true,
+          isNotification: false,
+        },
         settings
       );
-      expect(result.source).not.toBe('reply_transition');
+      expect(result.category).toBe('notification');
+      expect(result.source).toBe('topic_label');
     });
   });
 
@@ -139,6 +176,29 @@ describe('email-categorizer', () => {
       expect(result.source).toBe('topic_label');
       expect(result.matchedTopicLabel).toBe('billing');
       expect(result.confidence).toBeCloseTo(0.85, 1);
+    });
+
+    test('topic label matching uses normalized sender+subject+preview text', () => {
+      const settings = emptySettings();
+      settings.topicLabelsGloballyEnabled = true;
+      settings.topicLabels = [
+        { id: 'l2', key: 'vip-sender', patterns: ['founder@example.com'], mapsToCategory: 'todo', enabled: true }
+      ];
+
+      const result = categorize(
+        {
+          senderEmail: 'Founder@Example.com',
+          senderDomain: 'example.com',
+          subject: 'Weekly update',
+          preview: 'No urgent content',
+          hasUserReplyInThread: false,
+        },
+        settings
+      );
+
+      expect(result.category).toBe('todo');
+      expect(result.source).toBe('topic_label');
+      expect(result.matchedTopicLabel).toBe('vip-sender');
     });
 
     test('disabled topic label is skipped', () => {

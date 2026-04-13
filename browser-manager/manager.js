@@ -7,6 +7,13 @@ const EmailTriage = require('./src/email-triage');
 const { createExtractor } = require('./src/email-extractor-factory');
 const { loadVipSenders } = require('./src/vip-config');
 const { loadSettings } = require('./src/settings-store');
+const categorizationSettings = require('./src/categorization-settings');
+const { PriorityService } = require('./src/priority-service');
+const DraftService = require('./src/draft-service');
+const SendService = require('./src/send-service');
+const MailActionService = require('./src/mail-action-service');
+const { buildEmailId } = require('./src/email-id');
+const { resolveAiProviders } = require('./src/ai-provider-factory');
 
 function buildRuntimeEnv(baseEnv, settings) {
   const env = { ...baseEnv };
@@ -26,6 +33,28 @@ function buildRuntimeEnv(baseEnv, settings) {
 
   if (safe.lookbackDays !== undefined) {
     env.GRAPH_LOOKBACK_DAYS = String(safe.lookbackDays);
+  }
+
+  if (safe.aiProviderPrimary) {
+    env.AI_PROVIDER_PRIMARY = String(safe.aiProviderPrimary);
+  }
+  if (safe.aiProviderFallback) {
+    env.AI_PROVIDER_FALLBACK = String(safe.aiProviderFallback);
+  }
+  if (safe.anthropicApiKey) {
+    env.ANTHROPIC_API_KEY = String(safe.anthropicApiKey);
+  }
+  if (safe.openaiApiKey) {
+    env.OPENAI_API_KEY = String(safe.openaiApiKey);
+  }
+  if (safe.aiClaudeModel) {
+    env.CLAUDE_MODEL = String(safe.aiClaudeModel);
+  }
+  if (safe.aiOpenAiModel) {
+    env.OPENAI_MODEL = String(safe.aiOpenAiModel);
+  }
+  if (safe.aiGemmaModel) {
+    env.LMSTUDIO_MODEL = String(safe.aiGemmaModel);
   }
 
   return env;
@@ -57,6 +86,8 @@ function resolveDashboardPort() {
 class BrowserManager {
   constructor() {
     this.settings = loadSettings();
+    this.categorizationSettings = categorizationSettings;
+    this.categorizationSettings.loadSettings?.();
     this.runtimeEnv = buildRuntimeEnv(process.env, this.settings);
     this.dashboardPort = resolveDashboardPort();
     this.eventLogger = new EventLogger();
@@ -65,13 +96,24 @@ class BrowserManager {
     this.dashboardServer = new DashboardServer(this.dashboardPort);
     this.dashboardServer.setEventLogger(this.eventLogger);
     this.dashboardServer.setManager(this);
+    this.dashboardServer.setCategorizationSettings?.(this.categorizationSettings);
     this.emailExtractor = createExtractor(this.runtimeEnv);
     this.emailScorer = new EmailScorer({
       vipSenders: Array.isArray(this.settings.vipSenders) ? this.settings.vipSenders : loadVipSenders(this.runtimeEnv)
     });
-    this.emailTriage = new EmailTriage(this.emailExtractor, this.emailScorer, {
-      minScore: this.settings.minScore
+    this.refreshAiServices();
+    this.sendService = new SendService({
+      eventLogger: this.eventLogger,
+      user: this.runtimeEnv.GRAPH_USER,
+      baseUrl: this.runtimeEnv.GRAPH_BASE_URL,
     });
+    this.mailActionService = new MailActionService({
+      eventLogger: this.eventLogger,
+      user: this.runtimeEnv.GRAPH_USER,
+      baseUrl: this.runtimeEnv.GRAPH_BASE_URL,
+    });
+    this.emailTriage = new EmailTriage(this.emailExtractor, this.mailActionService, this.categorizationSettings);
+    this.lastTriageById = new Map();
     this.isRunning = false;
 
     // Stream all newly logged events to connected dashboard clients.
@@ -99,6 +141,27 @@ class BrowserManager {
 
     this.emailTriage.on('triage-error', (error) => {
       this.eventLogger.logAutomationEvent('email-triage-error', { error: error.error });
+    });
+  }
+
+  refreshAiServices() {
+    const providers = resolveAiProviders(this.settings);
+
+    this.priorityService = new PriorityService({
+      primaryProvider: providers.primaryProvider,
+      fallbackProvider: providers.fallbackProvider,
+      claudeModel: this.settings.aiClaudeModel,
+      gemmaModel: this.settings.aiGemmaModel,
+      eventLogger: this.eventLogger,
+    });
+
+    this.draftService = new DraftService({
+      primaryProvider: providers.primaryProvider,
+      fallbackProvider: providers.fallbackProvider,
+      claudeModel: this.settings.aiClaudeModel,
+      gemmaModel: this.settings.aiGemmaModel,
+      maxDraftLength: this.settings.maxDraftLength,
+      eventLogger: this.eventLogger,
     });
   }
 
@@ -196,7 +259,130 @@ class BrowserManager {
   }
 
   async triageEmails() {
-    return await this.emailTriage.run();
+    const results = await this.emailTriage.run();
+    this.lastTriageById.clear();
+    results.forEach((result) => {
+      const email = result && result.email;
+      const id = buildEmailId(email || result);
+      this.lastTriageById.set(id, email || result);
+    });
+    return results;
+  }
+
+  getEmailById(emailId) {
+    return this.lastTriageById.get(String(emailId)) || null;
+  }
+
+  getDraft(emailId) {
+    return this.draftService.getDraft(String(emailId));
+  }
+
+  listDrafts() {
+    return this.draftService.listDrafts();
+  }
+
+  async generateDraft(emailId) {
+    const email = this.getEmailById(emailId);
+    if (!email) {
+      throw new Error('Email not found in current triage result. Run triage first.');
+    }
+
+    const draft = await this.draftService.generateDraft(String(emailId), email, null);
+    this.eventLogger.logAutomationEvent('email-draft-generated', {
+      emailId: String(emailId),
+      providerUsed: draft.providerUsed,
+      version: draft.version,
+    });
+    return draft;
+  }
+
+  editDraft(emailId, updates) {
+    const draft = this.draftService.editDraft(String(emailId), updates || {});
+    this.eventLogger.logUserEvent('email-draft-edited', {
+      emailId: String(emailId),
+      version: draft.version,
+    });
+    return draft;
+  }
+
+  approveDraft(emailId, approvedBy) {
+    const draft = this.draftService.approveDraft(String(emailId), approvedBy || 'user');
+    this.eventLogger.logUserEvent('email-draft-approved', {
+      emailId: String(emailId),
+      approvedVersion: draft.approvedVersion,
+      approvedBy: draft.approvedBy,
+    });
+    return draft;
+  }
+
+  rejectDraft(emailId, reason) {
+    const draft = this.draftService.rejectDraft(String(emailId), reason || '');
+    this.eventLogger.logUserEvent('email-draft-rejected', {
+      emailId: String(emailId),
+      reason: draft.rejectionReason || '',
+    });
+    return draft;
+  }
+
+  async sendDraft(emailId) {
+    const id = String(emailId);
+    const draft = this.getDraft(id);
+    if (!draft) {
+      throw new Error('Draft not found');
+    }
+
+    const email = this.getEmailById(id);
+    if (!email) {
+      throw new Error('Email not found in triage cache');
+    }
+
+    const result = await this.sendService.sendApprovedDraft(draft, email);
+    const sentDraft = this.draftService.markSent(id);
+    this.eventLogger.logUserEvent('email-draft-sent', {
+      emailId: id,
+      statusCode: result.statusCode,
+      recipient: result.recipient,
+    });
+    return sentDraft;
+  }
+
+  async deleteEmail(emailId) {
+    const id = String(emailId);
+    const email = this.getEmailById(id);
+    const graphMessageId = (email && email.messageId) ? email.messageId : id;
+
+    const result = await this.mailActionService.deleteEmail(graphMessageId);
+    this.eventLogger.logUserEvent('email-deleted', {
+      emailId: id,
+      graphMessageId,
+      statusCode: result.statusCode,
+    });
+    return result;
+  }
+
+  async archiveEmail(emailId) {
+    const id = String(emailId);
+    const email = this.getEmailById(id);
+    const graphMessageId = (email && email.messageId) ? email.messageId : id;
+
+    const result = await this.mailActionService.archiveEmail(graphMessageId);
+    this.eventLogger.logUserEvent('email-archived', {
+      emailId: id,
+      graphMessageId,
+      statusCode: result.statusCode,
+    });
+    return result;
+  }
+
+  async markEmailRead(emailId, isRead = true) {
+    const id = String(emailId);
+    const result = await this.mailActionService.markAsRead(id, isRead);
+    this.eventLogger.logUserEvent('email-mark-read', {
+      emailId: id,
+      isRead,
+      statusCode: result.statusCode,
+    });
+    return result;
   }
 
   applySettings(settings) {
@@ -224,7 +410,32 @@ class BrowserManager {
         .filter(Boolean);
     }
 
+    if (next.categorizationSettings && typeof next.categorizationSettings === 'object') {
+      this.categorizationSettings.updateCache?.(next.categorizationSettings);
+      this.emailTriage.setCategorizationSettings?.(next.categorizationSettings);
+    }
+
+    if (
+      next.aiProviderPrimary !== undefined ||
+      next.aiProviderFallback !== undefined ||
+      next.anthropicApiKey !== undefined ||
+      next.openaiApiKey !== undefined ||
+      next.aiClaudeModel !== undefined ||
+      next.aiOpenAiModel !== undefined ||
+      next.aiGemmaModel !== undefined ||
+      next.maxDraftLength !== undefined
+    ) {
+      this.refreshAiServices();
+      this.emailTriage.priorityService = this.priorityService;
+    }
+
     this.emailTriage.scorer = this.emailScorer;
+  }
+
+  setCategorizationSettings(settings) {
+    const next = settings && typeof settings === 'object' ? settings : {};
+    this.categorizationSettings.updateCache?.(next);
+    this.emailTriage.setCategorizationSettings?.(next);
   }
 }
 
