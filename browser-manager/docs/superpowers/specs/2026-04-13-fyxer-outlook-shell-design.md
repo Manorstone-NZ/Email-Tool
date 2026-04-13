@@ -273,6 +273,7 @@ Category badge rules:
 - text truncates with ellipsis when it exceeds available width
 - full label is exposed via tooltip/title when truncation occurs
 - colour mapping must be consistent and static
+- category badge colour mapping is defined in the frontend design system and must not be derived from Outlook category tags or backend values at runtime
 - badge rendering must not change row height between items
 
 Actions:
@@ -280,7 +281,7 @@ Actions:
 - list rows are for scanning and selection only
 
 Virtualization stance:
-- inbox list must be able to support virtualization above `200` visible items
+- virtualization must be introduced once the inbox list regularly exceeds ~`200` rendered rows or shows measurable performance degradation
 - virtualization is not required for v1 but the layout must not block it later
 
 ### 6.4 Reader Pane Detail Hierarchy
@@ -337,6 +338,9 @@ Nothing loaded yet:
 - list shows loading or fetch error
 - reader pane mirrors that state
 
+Error-state rule:
+- data fetch errors must render a distinct error state, not reuse empty or `No messages match current filters` messaging
+
 No selected item:
 - reader pane shows `Select an email to view details`
 
@@ -353,6 +357,7 @@ Rules:
 - category filter is single-select
 - state filter is single-select in v1
 - search is client-side only across the currently loaded dataset in v1
+- search is applied before category/state filters, and all filters operate on the same in-memory dataset
 - filter changes do not reset reader scroll unless selection changes
 - refresh reloads the inbox list while preserving current filters and selection where possible
 
@@ -477,6 +482,8 @@ Section semantics:
 - in `Existing categories`, the primary toggle maps directly to `categories.<key>.enabled`
 - `Existing categories` rows may expose secondary controls for `targetFolderName`, `outlookCategoryTag`, and per-category topic-label enablement because those are part of the current persisted backend model
 - `Existing categories` is not mutually exclusive with sections 1 and 2; sections 1 and 2 describe inbox-behavior preferences, while `Existing categories` configures the underlying category definitions already supported by the backend
+- `Move these out of my Inbox` and `Keep these in my Inbox` influence inbox behavior preferences, while `Existing categories` defines the canonical category configuration used by the backend
+- if both apply, backend categorization determines the category, and inbox behavior settings determine whether the message remains in or is moved out of the inbox
 
 Each category/settings row contains:
 - left:
@@ -486,6 +493,7 @@ Each category/settings row contains:
   - toggle as primary control
 - optional secondary control:
   - aligned predictably beside or beneath the primary control when needed
+  - only visible when the corresponding category is enabled, unless explicitly required for configuration preview
 
 Rules:
 - row alignment must remain consistent across sections
@@ -606,6 +614,8 @@ For live updates:
 - it must not overwrite in-progress unsaved local edits
 - a local dirty flag determines whether incoming websocket settings are applied or ignored in the current session
 - if the page is dirty, incoming settings are ignored until the user saves or discards local edits
+- when the page has unsaved changes, a persistent visual indicator (for example, `Unsaved changes`) must be shown
+- navigation away from Settings should not silently discard unsaved changes without user confirmation (if confirmation is implemented)
 
 ### 7.13 Testing Expectations
 
