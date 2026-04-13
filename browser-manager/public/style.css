@@ -6,7 +6,7 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #fbfcfa;
     min-height: 100vh;
     color: #333;
 }
@@ -14,6 +14,54 @@ body {
 /* ── Portal shell ── */
 [hidden] {
     display: none !important;
+}
+
+:root {
+    --shell-bg: #f4f6f2;
+    --canvas-bg: #fbfcfa;
+    --line: #dfe5dc;
+    --shell-text: #2f3b31;
+    --shell-text-muted: #6f7b70;
+}
+
+.app-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    background: var(--canvas-bg);
+}
+
+.app-sidebar {
+    background: var(--shell-bg);
+    border-right: 1px solid var(--line);
+    padding: 24px 14px;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+}
+
+.shell-nav-link {
+    width: 100%;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--shell-text-muted);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.shell-nav-link:hover {
+    color: var(--shell-text);
+    background: #eef1eb;
+}
+
+.shell-nav-link.is-active {
+    border-color: var(--line);
+    background: #ffffff;
+    color: var(--shell-text);
 }
 
 .portal-nav {
@@ -48,9 +96,28 @@ body {
 }
 
 .portal-main {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 24px 20px;
+    width: 100%;
+    max-width: 1320px;
+    margin: 0;
+    padding: 24px;
+}
+
+@media (max-width: 1099px) {
+    .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 220px;
+        transform: translateX(-100%);
+        z-index: 1000;
+    }
+
+    .portal-main {
+        padding: 18px;
+    }
 }
 
 /* ── End portal shell ── */

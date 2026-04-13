@@ -7,13 +7,14 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <nav class="portal-nav">
-        <button type="button" data-route="email" class="portal-nav-link is-active">Email</button>
-        <button type="button" data-route="logs" class="portal-nav-link">Logs</button>
-        <button type="button" data-route="settings" class="portal-nav-link">Settings</button>
-    </nav>
+    <div class="app-shell">
+        <aside class="app-sidebar" data-region="app-sidebar">
+            <button type="button" data-route="email" class="shell-nav-link is-active">Email</button>
+            <button type="button" data-route="settings" class="shell-nav-link">Settings</button>
+            <button type="button" data-route="logs" class="shell-nav-link">Logs</button>
+        </aside>
 
-    <main class="portal-main">
+        <main class="portal-main">
         <section id="view-email" data-view="email">
             <aside class="email-rail">
                 <div class="rail-section">
@@ -231,7 +232,8 @@
                 </section>
             </div>
         </section>
-    </main>
+        </main>
+    </div>
 
     <div id="draftEditorModal" class="draft-editor-modal" hidden>
         <div class="draft-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="draftEditorTitle">

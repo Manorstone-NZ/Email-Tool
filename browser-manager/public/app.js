@@ -1247,6 +1247,7 @@ function normalizeRoute(hash) {
 }
 
 function applyRoute(route) {
+  document.body.dataset.route = route;
   document.querySelectorAll('[data-view]').forEach((node) => {
     const isVisible = node.dataset.view === route;
     node.hidden = !isVisible;
