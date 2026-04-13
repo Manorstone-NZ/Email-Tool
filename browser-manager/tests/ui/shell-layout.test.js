@@ -43,6 +43,21 @@ describe('Shell layout route contract', () => {
     expect(getActiveRoute()).toBe('settings');
     expect(document.body.dataset.route).toBe('settings');
   });
+
+  test('tablet/mobile sidebar is controlled by explicit menu toggle', async () => {
+    setViewport(768);
+    await bootstrapApp();
+
+    const toggle = document.getElementById('sidebarToggleBtn');
+    expect(toggle).toBeTruthy();
+    expect(document.body.classList.contains('sidebar-open')).toBe(false);
+
+    const { setSidebarOpen } = require('../../public/app.js');
+    setSidebarOpen(true);
+
+    expect(document.body.classList.contains('sidebar-open')).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
 });
 
 async function bootstrapApp() {
@@ -69,6 +84,8 @@ async function bootstrapApp() {
   };
 
   document.body.innerHTML = `
+    <button type="button" id="sidebarToggleBtn" class="app-sidebar-toggle" aria-controls="appSidebar" aria-expanded="false">Menu</button>
+
     <nav class="portal-nav">
       <button type="button" data-route="email" class="portal-nav-link">Email</button>
       <button type="button" data-route="logs" class="portal-nav-link">Logs</button>
@@ -182,4 +199,23 @@ function restoreGlobal(name, value) {
   }
 
   global[name] = value;
+}
+
+function setViewport(width) {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+
+  window.matchMedia = (query) => ({
+    matches: query.includes('1099px') ? width <= 1099 : width <= 767,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
 }

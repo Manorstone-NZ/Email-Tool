@@ -14,6 +14,8 @@ class DashboardClient {
       tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
     };
     this.selectedEmailId = null;
+    this.mobileReaderOpen = false;
+    this.emailListScrollTop = 0;
     this.triageError = null;
     // Logs state (session-only, no persistence)
     this.logs = [];
@@ -742,6 +744,9 @@ class DashboardClient {
     listEl.innerHTML = '';
 
     if (!safeItems.length) {
+      this.mobileReaderOpen = false;
+      this.renderReaderPane(null);
+      this.syncEmailWorkspaceState();
       if (emptyStateEl) {
         emptyStateEl.textContent = resolveEmptyStateMessage({
           triageError: this.triageError,
@@ -755,6 +760,10 @@ class DashboardClient {
     if (emptyStateEl) {
       emptyStateEl.hidden = true;
     }
+
+    const selectedItem = safeItems.find((item) => String((item && item.id) || '') === this.selectedEmailId) || null;
+    this.renderReaderPane(selectedItem);
+    this.syncEmailWorkspaceState();
 
     safeItems.forEach((item) => {
       const itemId = String(item && item.id ? item.id : '');
@@ -962,6 +971,8 @@ class DashboardClient {
           listEl.querySelectorAll('.email-card').forEach((node) => {
             node.dataset.selected = node.dataset.id === itemId ? 'true' : 'false';
           });
+          this.openMobileReader(listEl);
+          this.renderReaderPane(item);
         }
 
         const isExpanded = cardEl.dataset.expanded === 'true';
@@ -1163,6 +1174,83 @@ class DashboardClient {
     });
   }
 
+  renderReaderPane(item) {
+    const readerPane = document.getElementById('readerPane');
+    if (!readerPane) {
+      return;
+    }
+
+    readerPane.innerHTML = '';
+
+    if (!item) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'reader-empty';
+      placeholder.textContent = 'Select an email to view details.';
+      readerPane.appendChild(placeholder);
+      return;
+    }
+
+    if (isMobileReaderViewport()) {
+      const backButton = document.createElement('button');
+      backButton.type = 'button';
+      backButton.className = 'mobile-reader-back';
+      backButton.textContent = 'Back to inbox';
+      backButton.addEventListener('click', () => {
+        this.closeMobileReader();
+      });
+      readerPane.appendChild(backButton);
+    }
+
+    const subject = document.createElement('h3');
+    subject.className = 'reader-subject';
+    subject.textContent = String(item.subject || 'No subject');
+
+    const metadata = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
+
+    const body = document.createElement('div');
+    body.className = 'reader-body';
+    body.textContent = String(item.body || item.preview || 'No content available.');
+
+    readerPane.append(subject, metadata, body);
+  }
+
+  openMobileReader(listEl) {
+    if (!isMobileReaderViewport()) {
+      return;
+    }
+    this.emailListScrollTop = listEl ? Number(listEl.scrollTop || 0) : 0;
+    this.mobileReaderOpen = true;
+    this.syncEmailWorkspaceState();
+  }
+
+  closeMobileReader() {
+    this.mobileReaderOpen = false;
+    this.syncEmailWorkspaceState();
+
+    const listEl = document.getElementById('triageList');
+    if (listEl) {
+      listEl.scrollTop = this.emailListScrollTop;
+    }
+  }
+
+  syncEmailWorkspaceState() {
+    const workspace = document.querySelector('.email-workspace');
+    if (!workspace) {
+      return;
+    }
+
+    const isEmailRoute = (document.body.dataset.route || 'email') === 'email';
+    const isReaderOpen = isEmailRoute && this.mobileReaderOpen && isMobileReaderViewport();
+    workspace.classList.toggle('is-reader-open', isReaderOpen);
+  }
+
+  handleRouteChange(route) {
+    if (route !== 'email') {
+      this.mobileReaderOpen = false;
+    }
+    this.syncEmailWorkspaceState();
+  }
+
   escapeHtml(text) {
     const str = String(text);
     return str
@@ -1294,6 +1382,13 @@ function isCompactViewport() {
     return window.matchMedia('(max-width: 1099px)').matches;
   }
   return window.innerWidth <= 1099;
+}
+
+function isMobileReaderViewport() {
+  if (typeof window.matchMedia === 'function') {
+    return window.matchMedia('(max-width: 767px)').matches;
+  }
+  return window.innerWidth <= 767;
 }
 
 function setSidebarOpen(isOpen) {
@@ -1451,13 +1546,14 @@ document.addEventListener('DOMContentLoaded', () => {
   dashboard = new DashboardClient();
   dashboard.connect();
 
-  const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
-  if (sidebarToggleBtn) {
-    sidebarToggleBtn.addEventListener('click', () => {
-      const isOpen = document.body.classList.contains('sidebar-open');
-      setSidebarOpen(!isOpen);
-    });
-  }
+  document.addEventListener('click', (event) => {
+    const toggle = event.target.closest('#sidebarToggleBtn');
+    if (!toggle) {
+      return;
+    }
+    const isOpen = document.body.classList.contains('sidebar-open');
+    setSidebarOpen(!isOpen);
+  });
 
   // Periodically query events if not connected via WebSocket
   setInterval(() => {
@@ -1604,6 +1700,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     applyRoute(route);
+    dashboard.handleRouteChange(route);
     syncRouteHash(route);
     closeSidebarOnCompactViewport();
     if (typeof PortalState !== 'undefined') {
@@ -1622,6 +1719,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial dispatch: apply route immediately, then normalise URL if needed
   const startRoute = resolveRoute(window.location.hash);
   applyRoute(startRoute);
+  dashboard.handleRouteChange(startRoute);
   syncRouteHash(startRoute);
   if (typeof PortalState !== 'undefined') {
     PortalState.setActiveRoute(startRoute);
@@ -2242,7 +2340,7 @@ function handleSettingsUpdated(message) {
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage, createReaderMetadataStrip, getVisibleMetadataKeys, guardUnsavedSettingsNavigation, isSettingsDirty, setSettingsDirty };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage, createReaderMetadataStrip, getVisibleMetadataKeys, guardUnsavedSettingsNavigation, isSettingsDirty, setSettingsDirty, setSidebarOpen, isMobileReaderViewport };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;
