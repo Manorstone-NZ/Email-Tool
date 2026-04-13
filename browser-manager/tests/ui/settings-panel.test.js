@@ -142,6 +142,44 @@ describe('Settings Panel UI', () => {
     });
   });
 
+  describe('Categorization General Semantics', () => {
+    test('shows secondary category controls only when category enabled', async () => {
+      const { renderSettingsPanel } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+
+      const fyiCard = Array.from(container.querySelectorAll('.category-card')).find(c => c.textContent.includes('fyi'));
+      const secondaryControls = fyiCard.querySelectorAll('[data-secondary-control]');
+      expect(secondaryControls.length).toBeGreaterThan(0);
+      expect(Array.from(secondaryControls).every((el) => el.hidden)).toBe(true);
+
+      const todoCard = Array.from(container.querySelectorAll('.category-card')).find(c => c.textContent.includes('todo'));
+      const todoSecondaryControls = todoCard.querySelectorAll('[data-secondary-control]');
+      expect(Array.from(todoSecondaryControls).some((el) => !el.hidden)).toBe(true);
+    });
+
+    test('keeps Existing categories separate from Move/Keep behavior semantics', async () => {
+      const { renderSettingsPanel } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+
+      expect(container.querySelector('[data-categorization-section="existing-categories"]')).toBeTruthy();
+      expect(container.querySelector('[data-categorization-section="move-out"]')).toBeTruthy();
+      expect(container.querySelector('[data-categorization-section="keep-in"]')).toBeTruthy();
+    });
+
+    test('renders fixed section order for categorization general tab', async () => {
+      const { renderSettingsPanel } = require('../../public/app.js');
+
+      await renderSettingsPanel(container, mockApi);
+
+      const order = Array.from(container.querySelectorAll('[data-categorization-section]'))
+        .map((node) => node.dataset.categorizationSection);
+
+      expect(order).toEqual(['move-out', 'keep-in', 'existing-categories', 'topic-labels']);
+    });
+  });
+
   describe('Topic Labels Management', () => {
     test('renders add topic label button', async () => {
       const { renderSettingsPanel } = require('../../public/app.js');
@@ -158,7 +196,7 @@ describe('Settings Panel UI', () => {
       await renderSettingsPanel(container, mockApi);
       mockApi.putSettings.mockClear();
 
-      const labelItem = container.querySelector('.label-item');
+      const labelItem = container.querySelector('[data-label-id="l1"]');
       const deleteBtn = labelItem.querySelector('.delete-button');
 
       deleteBtn.click();
@@ -189,7 +227,7 @@ describe('Settings Panel UI', () => {
       await renderSettingsPanel(container, mockApi);
       mockApi.putSettings.mockClear();
 
-      const ruleItem = container.querySelector('.rule-item');
+      const ruleItem = container.querySelector('[data-rule-id="r1"]');
       const deleteBtn = ruleItem.querySelector('.delete-button');
 
       deleteBtn.click();
@@ -231,6 +269,7 @@ describe('Settings Panel UI', () => {
 
       handleSettingsUpdated({ key: 'categorisation', settings: incoming });
       expect(container.querySelector('#topicLabelsGloballyEnabled').checked).toBe(!initialValue);
+      expect(container.querySelector('[data-settings-dirty-indicator]').hidden).toBe(false);
     });
 
     test('navigating away while dirty does not silently discard changes', async () => {

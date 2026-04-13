@@ -1859,52 +1859,86 @@ async function renderSettingsPanel(container, api, providedSettings) {
     globalSection.appendChild(label);
     categorizationPanel.appendChild(globalSection);
 
-    const cardsSection = document.createElement('section');
-    cardsSection.className = 'category-cards';
-    const cardsTitle = document.createElement('h4');
-    cardsTitle.textContent = 'Categories';
-    cardsSection.appendChild(cardsTitle);
-    const cardsContainer = document.createElement('div');
-    cardsContainer.className = 'cards-container';
-    cardsContainer.id = 'category-cards';
+    const createCategorySection = (sectionKey, titleText, categories) => {
+      const section = document.createElement('section');
+      section.className = 'category-cards';
+      section.dataset.categorizationSection = sectionKey;
 
-    for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
-      const card = document.createElement('div');
-      card.className = 'category-card';
-      const catSettings = settings.categories[cat];
+      const title = document.createElement('h4');
+      title.textContent = titleText;
+      section.appendChild(title);
 
-      card.innerHTML = `
-        <h3>${cat}</h3>
-        <label>
-          <input type="checkbox" name="${cat}-enabled" ${catSettings.enabled ? 'checked' : ''} />
-          Enabled
-        </label>
-        <label>
-          Folder:
-          <input type="text" name="${cat}-targetFolderName" value="${catSettings.targetFolderName || ''}" />
-        </label>
-        <label>
-          Outlook Tag:
-          <input type="text" name="${cat}-outlookCategoryTag" value="${catSettings.outlookCategoryTag || ''}" />
-        </label>
-        <label>
-          <input type="checkbox" name="${cat}-topicLabels" ${catSettings.topicLabelsEnabled ? 'checked' : ''} />
-          Enable Topic Labels
-        </label>
-      `;
+      const cardsContainer = document.createElement('div');
+      cardsContainer.className = 'cards-container';
+      if (sectionKey === 'move-out') {
+        cardsContainer.id = 'category-cards';
+      }
 
-      card.querySelectorAll('input').forEach((input) => {
-        input.addEventListener('change', markSettingsDirty);
+      categories.forEach((cat) => {
+        const catSettings = settings.categories[cat] || {
+          enabled: false,
+          targetFolderName: '',
+          outlookCategoryTag: '',
+          topicLabelsEnabled: false,
+        };
+
+        const card = document.createElement('div');
+        card.className = 'category-card';
+
+        const enabled = Boolean(catSettings.enabled);
+        card.innerHTML = `
+          <h3>${cat}</h3>
+          <label>
+            <input type="checkbox" name="${cat}-enabled" ${enabled ? 'checked' : ''} />
+            Enabled
+          </label>
+          <label data-secondary-control ${enabled ? '' : 'hidden'}>
+            Folder:
+            <input type="text" name="${cat}-targetFolderName" value="${catSettings.targetFolderName || ''}" />
+          </label>
+          <label data-secondary-control ${enabled ? '' : 'hidden'}>
+            Outlook Tag:
+            <input type="text" name="${cat}-outlookCategoryTag" value="${catSettings.outlookCategoryTag || ''}" />
+          </label>
+          <label data-secondary-control ${enabled ? '' : 'hidden'}>
+            <input type="checkbox" name="${cat}-topicLabels" ${catSettings.topicLabelsEnabled ? 'checked' : ''} />
+            Enable Topic Labels
+          </label>
+        `;
+
+        card.querySelectorAll('input').forEach((input) => {
+          input.addEventListener('change', markSettingsDirty);
+        });
+
+        const enabledToggle = card.querySelector(`input[name="${cat}-enabled"]`);
+        if (enabledToggle) {
+          enabledToggle.addEventListener('change', () => {
+            const showSecondary = enabledToggle.checked;
+            card.querySelectorAll('[data-secondary-control]').forEach((control) => {
+              control.hidden = !showSecondary;
+            });
+          });
+        }
+
+        cardsContainer.appendChild(card);
       });
 
-      cardsContainer.appendChild(card);
-    }
+      section.appendChild(cardsContainer);
+      return section;
+    };
 
-    cardsSection.appendChild(cardsContainer);
-    categorizationPanel.appendChild(cardsSection);
+    const moveOutSection = createCategorySection('move-out', 'Move out', ['todo', 'notification']);
+    categorizationPanel.appendChild(moveOutSection);
+
+    const keepInSection = createCategorySection('keep-in', 'Keep in', ['fyi', 'to_follow_up']);
+    categorizationPanel.appendChild(keepInSection);
+
+    const existingCategoriesSection = createCategorySection('existing-categories', 'Existing categories', ['marketing']);
+    categorizationPanel.appendChild(existingCategoriesSection);
 
     const labelsSection = document.createElement('section');
     labelsSection.className = 'topic-labels-section';
+    labelsSection.dataset.categorizationSection = 'topic-labels';
     const labelsTitle = document.createElement('h4');
     labelsTitle.textContent = 'Topic Labels';
     labelsSection.appendChild(labelsTitle);
@@ -1919,6 +1953,7 @@ async function renderSettingsPanel(container, api, providedSettings) {
     for (const topicLabel of settings.topicLabels) {
       const li = document.createElement('li');
       li.className = 'label-item';
+      li.dataset.labelId = String(topicLabel.id);
       li.innerHTML = `
         <span>${topicLabel.key} → ${topicLabel.mapsToCategory} (${topicLabel.patterns.join(', ')})</span>
         <button class="delete-button" data-id="${topicLabel.id}">Delete</button>
@@ -1958,6 +1993,7 @@ async function renderSettingsPanel(container, api, providedSettings) {
     for (const rule of settings.customRules) {
       const li = document.createElement('li');
       li.className = 'rule-item';
+      li.dataset.ruleId = String(rule.id);
       li.innerHTML = `
         <span>${rule.type}: ${rule.value} → ${rule.action}</span>
         <button class="delete-button" data-id="${rule.id}">Delete</button>
