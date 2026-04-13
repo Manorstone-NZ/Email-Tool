@@ -1845,6 +1845,23 @@ async function renderSettingsPanel(container, api, providedSettings) {
     `;
     categorizationPanel.appendChild(actionRow);
 
+    const categorizationTabs = document.createElement('div');
+    categorizationTabs.className = 'categorization-tabs';
+    categorizationTabs.innerHTML = `
+      <button type="button" class="settings-tab-button" data-categorization-tab-trigger="general">General</button>
+      <button type="button" class="settings-tab-button" data-categorization-tab-trigger="advanced">Advanced</button>
+    `;
+    categorizationPanel.appendChild(categorizationTabs);
+
+    const generalPanel = document.createElement('div');
+    generalPanel.className = 'categorization-tab-panel';
+    generalPanel.dataset.categorizationTabPanel = 'general';
+
+    const advancedPanel = document.createElement('div');
+    advancedPanel.className = 'categorization-tab-panel';
+    advancedPanel.dataset.categorizationTabPanel = 'advanced';
+    advancedPanel.hidden = true;
+
     const globalSection = document.createElement('section');
     globalSection.className = 'global-settings';
     const globalToggle = document.createElement('input');
@@ -1928,13 +1945,13 @@ async function renderSettingsPanel(container, api, providedSettings) {
     };
 
     const moveOutSection = createCategorySection('move-out', 'Move out', ['todo', 'notification']);
-    categorizationPanel.appendChild(moveOutSection);
+    generalPanel.appendChild(moveOutSection);
 
     const keepInSection = createCategorySection('keep-in', 'Keep in', ['fyi', 'to_follow_up']);
-    categorizationPanel.appendChild(keepInSection);
+    generalPanel.appendChild(keepInSection);
 
     const existingCategoriesSection = createCategorySection('existing-categories', 'Existing categories', ['marketing']);
-    categorizationPanel.appendChild(existingCategoriesSection);
+    generalPanel.appendChild(existingCategoriesSection);
 
     const labelsSection = document.createElement('section');
     labelsSection.className = 'topic-labels-section';
@@ -1956,8 +1973,32 @@ async function renderSettingsPanel(container, api, providedSettings) {
       li.dataset.labelId = String(topicLabel.id);
       li.innerHTML = `
         <span>${topicLabel.key} → ${topicLabel.mapsToCategory} (${topicLabel.patterns.join(', ')})</span>
-        <button class="delete-button" data-id="${topicLabel.id}">Delete</button>
+        <div>
+          <button type="button" class="btn btn-secondary" data-topic-label-move="up" data-id="${topicLabel.id}">↑</button>
+          <button type="button" class="btn btn-secondary" data-topic-label-move="down" data-id="${topicLabel.id}">↓</button>
+          <button class="delete-button" data-id="${topicLabel.id}">Delete</button>
+        </div>
       `;
+      li.querySelector('[data-topic-label-move="up"]').addEventListener('click', () => {
+        const index = settings.topicLabels.findIndex((entry) => entry.id === topicLabel.id);
+        if (index > 0) {
+          const tmp = settings.topicLabels[index - 1];
+          settings.topicLabels[index - 1] = settings.topicLabels[index];
+          settings.topicLabels[index] = tmp;
+          markSettingsDirty();
+          renderSettingsPanel(container, api, settings);
+        }
+      });
+      li.querySelector('[data-topic-label-move="down"]').addEventListener('click', () => {
+        const index = settings.topicLabels.findIndex((entry) => entry.id === topicLabel.id);
+        if (index >= 0 && index < settings.topicLabels.length - 1) {
+          const tmp = settings.topicLabels[index + 1];
+          settings.topicLabels[index + 1] = settings.topicLabels[index];
+          settings.topicLabels[index] = tmp;
+          markSettingsDirty();
+          renderSettingsPanel(container, api, settings);
+        }
+      });
       li.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
         settings.topicLabels = settings.topicLabels.filter((entry) => entry.id !== topicLabel.id);
@@ -1969,13 +2010,13 @@ async function renderSettingsPanel(container, api, providedSettings) {
 
     addLabelBtn.addEventListener('click', () => {
       const id = `label_${Date.now()}`;
-      settings.topicLabels.push({ id, key: 'new-label', mapsToCategory: 'todo', patterns: ['example'], enabled: true });
+      settings.topicLabels.push({ id, key: 'vip', mapsToCategory: 'todo', patterns: ['vip'], enabled: true });
       markSettingsDirty();
       renderSettingsPanel(container, api, settings);
     });
 
     labelsSection.appendChild(labelsList);
-    categorizationPanel.appendChild(labelsSection);
+    generalPanel.appendChild(labelsSection);
 
     const rulesSection = document.createElement('section');
     rulesSection.className = 'custom-rules-section';
@@ -1986,25 +2027,86 @@ async function renderSettingsPanel(container, api, providedSettings) {
     addRuleBtn.className = 'add-rule-button';
     addRuleBtn.textContent = '+ Add Custom Rule';
     rulesSection.appendChild(addRuleBtn);
-    const rulesList = document.createElement('ul');
+    const rulesList = document.createElement('div');
     rulesList.className = 'custom-rules-list';
     rulesList.id = 'custom-rules-list';
 
     for (const rule of settings.customRules) {
-      const li = document.createElement('li');
-      li.className = 'rule-item';
-      li.dataset.ruleId = String(rule.id);
-      li.innerHTML = `
-        <span>${rule.type}: ${rule.value} → ${rule.action}</span>
-        <button class="delete-button" data-id="${rule.id}">Delete</button>
+      const row = document.createElement('div');
+      row.className = 'custom-rule-row';
+      row.dataset.ruleId = String(rule.id);
+
+      const enabledCol = document.createElement('div');
+      enabledCol.dataset.column = 'enabled';
+      enabledCol.innerHTML = `<input type="checkbox" ${rule.enabled ? 'checked' : ''}>`;
+
+      const inputCol = document.createElement('div');
+      inputCol.dataset.column = 'input';
+      inputCol.innerHTML = `<input type="text" value="${rule.value || ''}">`;
+
+      const categoryCol = document.createElement('div');
+      categoryCol.dataset.column = 'category';
+      categoryCol.innerHTML = `
+        <select>
+          <option value="todo" ${rule.action === 'todo' ? 'selected' : ''}>todo</option>
+          <option value="fyi" ${rule.action === 'fyi' ? 'selected' : ''}>fyi</option>
+          <option value="to_follow_up" ${rule.action === 'to_follow_up' ? 'selected' : ''}>to_follow_up</option>
+          <option value="notification" ${rule.action === 'notification' ? 'selected' : ''}>notification</option>
+          <option value="marketing" ${rule.action === 'marketing' ? 'selected' : ''}>marketing</option>
+        </select>
       `;
-      li.querySelector('.delete-button').addEventListener('click', (e) => {
+
+      const actionCol = document.createElement('div');
+      actionCol.dataset.column = 'action';
+      actionCol.innerHTML = `
+        <button type="button" class="btn btn-secondary" data-rule-move="up" data-id="${rule.id}">↑</button>
+        <button type="button" class="btn btn-secondary" data-rule-move="down" data-id="${rule.id}">↓</button>
+        <button type="button" class="delete-button" data-id="${rule.id}">Delete</button>
+      `;
+
+      enabledCol.querySelector('input').addEventListener('change', (e) => {
+        rule.enabled = e.target.checked;
+        markSettingsDirty();
+      });
+      inputCol.querySelector('input').addEventListener('input', (e) => {
+        rule.value = e.target.value;
+        markSettingsDirty();
+      });
+      categoryCol.querySelector('select').addEventListener('change', (e) => {
+        rule.action = e.target.value;
+        markSettingsDirty();
+      });
+
+      actionCol.querySelector('[data-rule-move="up"]').addEventListener('click', () => {
+        const index = settings.customRules.findIndex((entry) => entry.id === rule.id);
+        if (index > 0) {
+          const tmp = settings.customRules[index - 1];
+          settings.customRules[index - 1] = settings.customRules[index];
+          settings.customRules[index] = tmp;
+          markSettingsDirty();
+          renderSettingsPanel(container, api, settings);
+        }
+      });
+      actionCol.querySelector('[data-rule-move="down"]').addEventListener('click', () => {
+        const index = settings.customRules.findIndex((entry) => entry.id === rule.id);
+        if (index >= 0 && index < settings.customRules.length - 1) {
+          const tmp = settings.customRules[index + 1];
+          settings.customRules[index + 1] = settings.customRules[index];
+          settings.customRules[index] = tmp;
+          markSettingsDirty();
+          renderSettingsPanel(container, api, settings);
+        }
+      });
+
+      actionCol.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
         settings.customRules = settings.customRules.filter((entry) => entry.id !== rule.id);
         markSettingsDirty();
         renderSettingsPanel(container, api, settings);
       });
-      rulesList.appendChild(li);
+
+      row.append(enabledCol, inputCol, categoryCol, actionCol);
+      rulesList.appendChild(row);
     }
 
     addRuleBtn.addEventListener('click', () => {
@@ -2015,7 +2117,84 @@ async function renderSettingsPanel(container, api, providedSettings) {
     });
 
     rulesSection.appendChild(rulesList);
-    categorizationPanel.appendChild(rulesSection);
+    advancedPanel.appendChild(rulesSection);
+
+    const marketingSection = document.createElement('section');
+    marketingSection.className = 'marketing-strategy-section';
+    marketingSection.innerHTML = `
+      <h4>Marketing classification strategy</h4>
+      <select id="marketingStrategyControl">
+        <option value="default" ${(settings.marketingStrategy || 'default') === 'default' ? 'selected' : ''}>default</option>
+        <option value="aggressive" ${settings.marketingStrategy === 'aggressive' ? 'selected' : ''}>aggressive</option>
+        <option value="conservative" ${settings.marketingStrategy === 'conservative' ? 'selected' : ''}>conservative</option>
+      </select>
+    `;
+    marketingSection.querySelector('#marketingStrategyControl').addEventListener('change', (e) => {
+      settings.marketingStrategy = e.target.value;
+      markSettingsDirty();
+    });
+    advancedPanel.appendChild(marketingSection);
+
+    const identitiesSection = document.createElement('section');
+    identitiesSection.className = 'alternative-identities-section';
+    identitiesSection.innerHTML = '<h4>Alternative email identities</h4>';
+    const identitiesList = document.createElement('div');
+    identitiesList.className = 'alternative-identities-list';
+    const identities = Array.isArray(settings.alternativeEmails) ? settings.alternativeEmails : [];
+    identities.forEach((identity, index) => {
+      const row = document.createElement('div');
+      row.className = 'alternative-identity-row';
+      row.innerHTML = `
+        <input type="text" value="${identity}">
+        <button type="button" class="delete-button" data-identity-index="${index}">Delete</button>
+      `;
+      row.querySelector('input').addEventListener('input', (e) => {
+        settings.alternativeEmails[index] = e.target.value;
+        markSettingsDirty();
+      });
+      row.querySelector('.delete-button').addEventListener('click', () => {
+        settings.alternativeEmails.splice(index, 1);
+        markSettingsDirty();
+        renderSettingsPanel(container, api, settings);
+      });
+      identitiesList.appendChild(row);
+    });
+    const addIdentityBtn = document.createElement('button');
+    addIdentityBtn.type = 'button';
+    addIdentityBtn.className = 'add-identity-button';
+    addIdentityBtn.textContent = '+ Add identity';
+    addIdentityBtn.addEventListener('click', () => {
+      settings.alternativeEmails = Array.isArray(settings.alternativeEmails) ? settings.alternativeEmails : [];
+      settings.alternativeEmails.push('new-identity@example.com');
+      markSettingsDirty();
+      renderSettingsPanel(container, api, settings);
+    });
+    identitiesSection.appendChild(identitiesList);
+    identitiesSection.appendChild(addIdentityBtn);
+    advancedPanel.appendChild(identitiesSection);
+
+    categorizationPanel.appendChild(generalPanel);
+    categorizationPanel.appendChild(advancedPanel);
+
+    const setActiveCategorizationTab = (tab) => {
+      const normalized = tab === 'advanced' ? 'advanced' : 'general';
+      generalPanel.hidden = normalized !== 'general';
+      advancedPanel.hidden = normalized !== 'advanced';
+      categorizationTabs.querySelectorAll('[data-categorization-tab-trigger]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.dataset.categorizationTabTrigger === normalized);
+      });
+      if (typeof PortalState !== 'undefined' && PortalState.setCategorizationTab) {
+        PortalState.setCategorizationTab(normalized);
+      }
+    };
+
+    categorizationTabs.querySelectorAll('[data-categorization-tab-trigger]').forEach((btn) => {
+      btn.addEventListener('click', () => setActiveCategorizationTab(btn.dataset.categorizationTabTrigger));
+    });
+    const initialCategorizationTab = (typeof PortalState !== 'undefined' && PortalState.getCategorizationTab)
+      ? PortalState.getCategorizationTab()
+      : 'general';
+    setActiveCategorizationTab(initialCategorizationTab);
 
     container.appendChild(categorizationPanel);
 

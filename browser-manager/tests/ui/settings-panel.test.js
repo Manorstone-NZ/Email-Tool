@@ -9,6 +9,8 @@ describe('Settings Panel UI', () => {
     mockApi = {
       getSettings: jest.fn().mockResolvedValue({
         topicLabelsGloballyEnabled: true,
+        marketingStrategy: 'default',
+        alternativeEmails: ['ops@example.com'],
         categories: {
           todo: { enabled: true, targetFolderName: 'Todo', outlookCategoryTag: 'Todo', topicLabelsEnabled: true },
           fyi: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
@@ -16,7 +18,10 @@ describe('Settings Panel UI', () => {
           notification: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
           marketing: { enabled: false, targetFolderName: '', outlookCategoryTag: '', topicLabelsEnabled: true },
         },
-        topicLabels: [{ id: 'l1', key: 'billing', patterns: ['invoice'], mapsToCategory: 'notification', enabled: true }],
+        topicLabels: [
+          { id: 'l1', key: 'billing', patterns: ['invoice'], mapsToCategory: 'notification', enabled: true },
+          { id: 'l2', key: 'important', patterns: ['important'], mapsToCategory: 'todo', enabled: true },
+        ],
         customRules: [{ id: 'r1', enabled: true, type: 'sender_email', value: 'boss@example.com', action: 'todo' }],
       }),
       putSettings: jest.fn().mockResolvedValue({ success: true, settings: {} }),
@@ -91,7 +96,8 @@ describe('Settings Panel UI', () => {
 
       const rulesList = container.querySelector('.custom-rules-list');
       expect(rulesList).toBeTruthy();
-      expect(rulesList.textContent).toContain('boss@example.com');
+      const firstRuleValue = rulesList.querySelector('.custom-rule-row [data-column="input"] input');
+      expect(firstRuleValue.value).toBe('boss@example.com');
     });
 
     test('fetches settings on load', async () => {
@@ -207,7 +213,7 @@ describe('Settings Panel UI', () => {
 
       expect(mockApi.putSettings).toHaveBeenCalled();
       const putCall = mockApi.putSettings.mock.calls[0][0];
-      expect(putCall.topicLabels).toHaveLength(0);
+      expect(putCall.topicLabels).toHaveLength(1);
     });
   });
 
@@ -319,6 +325,62 @@ describe('Settings Panel UI', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
 
       expect(container.querySelector('.global-settings')).toBeTruthy();
+    });
+  });
+
+  describe('Advanced Categorization Tab', () => {
+    async function openAdvanced() {
+      const { renderSettingsPanel } = require('../../public/app.js');
+      await renderSettingsPanel(container, mockApi);
+      const trigger = container.querySelector('[data-categorization-tab-trigger="advanced"]');
+      trigger.click();
+    }
+
+    test('renders custom rule row with enable/input/category/action columns', async () => {
+      await openAdvanced();
+      const firstRow = container.querySelector('.custom-rule-row');
+      const columns = Array.from(firstRow.querySelectorAll('[data-column]')).map((el) => el.dataset.column);
+      expect(columns).toEqual(['enabled', 'input', 'category', 'action']);
+    });
+
+    test('adding/removing rule rows does not shift unrelated row columns', async () => {
+      await openAdvanced();
+      const before = Array.from(container.querySelectorAll('.custom-rule-row'))
+        .map((row) => Array.from(row.querySelectorAll('[data-column]')).map((el) => el.dataset.column));
+
+      container.querySelector('.add-rule-button').click();
+      const removable = container.querySelector('.custom-rule-row[data-rule-id="r1"] .delete-button');
+      removable.click();
+
+      const after = Array.from(container.querySelectorAll('.custom-rule-row'))
+        .map((row) => Array.from(row.querySelectorAll('[data-column]')).map((el) => el.dataset.column));
+
+      expect(after[0]).toEqual(before[0]);
+    });
+
+    test('topic labels render in saved order and append-only behavior', async () => {
+      const { renderSettingsPanel } = require('../../public/app.js');
+      await renderSettingsPanel(container, mockApi);
+
+      const before = Array.from(container.querySelectorAll('.label-item span')).map((el) => el.textContent);
+      expect(before[0]).toContain('billing');
+      expect(before[1]).toContain('important');
+
+      container.querySelector('.add-label-button').click();
+      const after = Array.from(container.querySelectorAll('.label-item span')).map((el) => el.textContent);
+      expect(after[after.length - 1]).toContain('vip');
+    });
+
+    test('renders marketing classification strategy controls in Advanced tab', async () => {
+      await openAdvanced();
+      expect(container.textContent).toContain('Marketing classification strategy');
+      expect(container.querySelector('#marketingStrategyControl')).toBeTruthy();
+    });
+
+    test('renders alternative email identities collection in Advanced tab', async () => {
+      await openAdvanced();
+      expect(container.textContent).toContain('Alternative email identities');
+      expect(container.querySelectorAll('.alternative-identity-row').length).toBeGreaterThan(0);
     });
   });
 });

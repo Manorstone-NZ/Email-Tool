@@ -1281,6 +1281,16 @@ header h1 {
     margin-bottom: 12px;
 }
 
+.categorization-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.categorization-tab-panel[hidden] {
+    display: none;
+}
+
 .settings-dirty-indicator {
     color: #8a4b00;
     font-size: 13px;
@@ -1342,6 +1352,27 @@ header h1 {
 .label-item,
 .rule-item {
   flex-grow: 1;
+}
+
+.custom-rule-row {
+    display: grid;
+    grid-template-columns: 80px minmax(220px, 1fr) 180px 120px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.custom-rule-row [data-column="action"] {
+    display: flex;
+    gap: 4px;
+}
+
+.alternative-identity-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 80px;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 .delete-button {
