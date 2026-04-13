@@ -16,6 +16,7 @@ class DashboardClient {
     this.selectedEmailId = null;
     this.mobileReaderOpen = false;
     this.emailListScrollTop = 0;
+    this.isRefreshingTriage = false;
     this.triageError = null;
     // Logs state (session-only, no persistence)
     this.logs = [];
@@ -24,6 +25,7 @@ class DashboardClient {
     this.logsFilterWindow = '15m';
     this.logsIsLive = false;
     this.logsExpandedRowId = null;
+    this.graphAuthPollTimer = null;
   }
 
   connect() {
@@ -207,6 +209,9 @@ class DashboardClient {
       };
       await renderSettingsPanel(panel, api);
     }
+
+    // Setup Graph Auth button after settings are loaded
+    this.setupGraphAuthButton();
   }
 
   async loadArchiveFolderOptions(selectedFolderId) {
@@ -484,6 +489,7 @@ class DashboardClient {
       'graphClientId',
       'graphTenantId',
       'archiveFolderId',
+      'emailSignature',
       'lookbackDays',
       'minScore',
       'vipSenders',
@@ -510,6 +516,9 @@ class DashboardClient {
     if (f('setting-maxDraftLength')) f('setting-maxDraftLength').value = s.maxDraftLength ?? 4000;
     if (f('setting-vipSenders')) {
       f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
+    }
+    if (f('setting-emailSignature')) {
+      f('setting-emailSignature').value = s.emailSignature || '';
     }
     const extraSettings = {};
     Object.keys(settings).forEach((key) => {
@@ -548,6 +557,7 @@ class DashboardClient {
         lookbackDays: Number(formData.get('lookbackDays')) || 3,
         minScore: Number(formData.get('minScore')) || 20,
         vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
+        emailSignature: formData.get('emailSignature') || '',
         aiProviderPrimary: formData.get('aiProviderPrimary') || 'claude-opus',
         aiProviderFallback: formData.get('aiProviderFallback') || 'gemma-lmstudio',
         openaiApiKey: formData.get('openaiApiKey') || '',
@@ -583,6 +593,11 @@ class DashboardClient {
   async refreshTriage() {    const statusEl = document.getElementById('triageStatus');
     const btnEl = document.getElementById('triageRefreshBtn');
 
+    if (this.isRefreshingTriage) {
+      return;
+    }
+    this.isRefreshingTriage = true;
+
     if (btnEl) {
       btnEl.disabled = true;
     }
@@ -612,6 +627,7 @@ class DashboardClient {
         statusEl.textContent = this.triageError;
       }
     } finally {
+      this.isRefreshingTriage = false;
       if (btnEl) {
         btnEl.disabled = false;
       }
@@ -1248,7 +1264,228 @@ class DashboardClient {
     if (route !== 'email') {
       this.mobileReaderOpen = false;
     }
+    if (route !== 'settings') {
+      this.stopGraphAuthPolling();
+    }
     this.syncEmailWorkspaceState();
+  }
+
+  stopGraphAuthPolling() {
+    if (this.graphAuthPollTimer) {
+      clearInterval(this.graphAuthPollTimer);
+      this.graphAuthPollTimer = null;
+    }
+  }
+
+  pollGraphAuthStatus(sessionId) {
+    const statusEl = document.getElementById('graphAuthStatus');
+    if (!sessionId) {
+      return;
+    }
+
+    this.stopGraphAuthPolling();
+
+    const pollOnce = async () => {
+      try {
+        const response = await fetch(`/api/graph-auth/status/${encodeURIComponent(sessionId)}`);
+        if (!response.ok) {
+          throw new Error(`Status check failed (${response.status})`);
+        }
+        const data = await response.json();
+
+        if (data.status === 'completed') {
+          if (statusEl) {
+            statusEl.textContent = 'Authentication complete. Graph token saved.';
+          }
+          this.stopGraphAuthPolling();
+          return;
+        }
+
+        if (data.status === 'failed') {
+          if (statusEl) {
+            statusEl.textContent = `Authentication failed: ${data.error || 'Unknown error'}`;
+          }
+          this.stopGraphAuthPolling();
+          return;
+        }
+
+        if (statusEl) {
+          statusEl.textContent = 'Waiting for Microsoft sign-in approval...';
+        }
+      } catch (error) {
+        if (statusEl) {
+          statusEl.textContent = `Status check error: ${error.message}`;
+        }
+      }
+    };
+
+    void pollOnce();
+    this.graphAuthPollTimer = setInterval(() => {
+      void pollOnce();
+    }, 3000);
+  }
+
+  setupGraphAuthButton() {
+    try {
+      let graphAuthBtn = document.getElementById('graphAuthButton');
+      
+      // If button doesn't exist in DOM, create and insert it dynamically
+      if (!graphAuthBtn) {
+        const tenantInput = document.getElementById('setting-tenantId');
+        if (tenantInput) {
+          const tenantGroup = tenantInput.closest('.setting-group');
+          if (tenantGroup && tenantGroup.parentNode) {
+            // Create the button group with more explicit styling
+            const buttonGroup = document.createElement('div');
+            buttonGroup.className = 'setting-group';
+            buttonGroup.innerHTML = `
+              <label>Microsoft Graph Authentication</label>
+              <button type="button" id="graphAuthButton" class="btn btn-secondary" style="margin:8px 0;">Authenticate with Microsoft Graph</button>
+              <div id="graphAuthCodeRow" style="display:none; margin:8px 0; gap:8px; align-items:center;">
+                <input id="graphAuthDeviceCode" type="text" readonly aria-label="Graph device code" style="min-width:220px;" />
+                <button type="button" id="graphAuthCopyCodeBtn" class="btn btn-secondary">Copy code</button>
+              </div>
+              <div id="graphAuthStatus" class="settings-save-status" aria-live="polite"></div>
+              <small>Opens the device code flow to authorize Graph API access.</small>
+            `;
+            // Insert after the tenant ID group
+            tenantGroup.parentNode.insertBefore(buttonGroup, tenantGroup.nextSibling);
+            graphAuthBtn = document.getElementById('graphAuthButton');
+          }
+        }
+      }
+      
+      // Attach click handler
+      if (graphAuthBtn && !graphAuthBtn.dataset.graphAuthSetup) {
+        graphAuthBtn.dataset.graphAuthSetup = 'true';
+        graphAuthBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          await this.startGraphAuth();
+        });
+      }
+
+      const copyBtn = document.getElementById('graphAuthCopyCodeBtn');
+      if (copyBtn && !copyBtn.dataset.graphAuthSetup) {
+        copyBtn.dataset.graphAuthSetup = 'true';
+        copyBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const codeInput = document.getElementById('graphAuthDeviceCode');
+          const statusEl = document.getElementById('graphAuthStatus');
+          const code = codeInput && typeof codeInput.value === 'string' ? codeInput.value.trim() : '';
+          if (!code) {
+            if (statusEl) {
+              statusEl.textContent = 'No device code available yet.';
+            }
+            return;
+          }
+
+          try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              await navigator.clipboard.writeText(code);
+              if (statusEl) {
+                statusEl.textContent = `Device code copied: ${code}`;
+              }
+              return;
+            }
+          } catch {
+            // Fall back to manual selection below.
+          }
+
+          if (codeInput && typeof codeInput.select === 'function') {
+            codeInput.focus();
+            codeInput.select();
+          }
+          if (statusEl) {
+            statusEl.textContent = `Clipboard blocked. Device code selected: ${code}`;
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error setting up graph auth button:', error);
+    }
+  }
+
+  async startGraphAuth() {
+    const originalText = 'Authenticate with Microsoft Graph';
+    const btn = document.getElementById('graphAuthButton');
+    const statusEl = document.getElementById('graphAuthStatus');
+    const codeRow = document.getElementById('graphAuthCodeRow');
+    const codeInput = document.getElementById('graphAuthDeviceCode');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Starting authentication...';
+    if (statusEl) {
+      statusEl.textContent = 'Requesting device code...';
+    }
+
+    try {
+      const response = await fetch('/api/graph-auth/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      if (data.success) {
+        const message = data.instructions || 'Authentication started';
+        const deviceCode = String(data.userCode || '').trim();
+
+        if (codeRow) {
+          codeRow.style.display = deviceCode ? 'flex' : 'none';
+        }
+        if (codeInput) {
+          codeInput.value = deviceCode;
+        }
+
+        if (deviceCode) {
+          try {
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              await navigator.clipboard.writeText(deviceCode);
+            }
+          } catch {
+            // Non-fatal: user can still use the copy button or selected field.
+          }
+        }
+
+        if (statusEl) {
+          statusEl.textContent = deviceCode
+            ? `Device code ready: ${deviceCode}. Opening Microsoft sign-in...`
+            : 'Device code ready.';
+        }
+        if (data.verificationUri) {
+          window.open(data.verificationUri, '_blank', 'noopener,noreferrer');
+        }
+        if (data.sessionId) {
+          this.pollGraphAuthStatus(data.sessionId);
+        }
+        alert(`Graph Authentication Instructions:\n\n${message}\n\nThe device code is also shown in Settings for easy copy/paste.`);
+      } else {
+        if (codeRow) {
+          codeRow.style.display = 'none';
+        }
+        if (codeInput) {
+          codeInput.value = '';
+        }
+        if (statusEl) {
+          statusEl.textContent = `Authentication failed: ${data.error || 'Unknown error'}`;
+        }
+        alert(`Authentication failed: ${data.error}`);
+      }
+    } catch (error) {
+      if (statusEl) {
+        statusEl.textContent = `Error starting authentication: ${error.message}`;
+      }
+      alert(`Error starting authentication: ${error.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 
   escapeHtml(text) {
@@ -1706,6 +1943,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof PortalState !== 'undefined') {
       PortalState.setActiveRoute(route);
     }
+    if (route === 'email') {
+      dashboard.refreshTriage();
+    }
   });
 
   window.addEventListener('beforeunload', (event) => {
@@ -1723,6 +1963,9 @@ document.addEventListener('DOMContentLoaded', () => {
   syncRouteHash(startRoute);
   if (typeof PortalState !== 'undefined') {
     PortalState.setActiveRoute(startRoute);
+  }
+  if (startRoute === 'email') {
+    dashboard.refreshTriage();
   }
 });
 

@@ -2,7 +2,10 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const crypto = require('crypto');
 const { loadSettings, saveSettings } = require('./src/settings-store');
+const { requestDeviceCode, pollForToken } = require('./src/graph-device-auth');
+const GraphTokenStore = require('./src/graph-token-store');
 const { buildEmailId } = require('./src/email-id');
 
 function isPlainObject(value) {
@@ -16,6 +19,7 @@ function buildSettingsUpdates(body) {
     graphClientId,
     graphTenantId,
     archiveFolderId,
+    emailSignature,
     lookbackDays,
     minScore,
     vipSenders,
@@ -38,6 +42,7 @@ function buildSettingsUpdates(body) {
   if (graphClientId !== undefined) updates.graphClientId = String(graphClientId).trim();
   if (graphTenantId !== undefined) updates.graphTenantId = String(graphTenantId).trim() || 'organizations';
   if (archiveFolderId !== undefined) updates.archiveFolderId = String(archiveFolderId).trim();
+  if (emailSignature !== undefined) updates.emailSignature = String(emailSignature).trim();
   if (lookbackDays !== undefined) updates.lookbackDays = Number(lookbackDays);
   if (minScore !== undefined) updates.minScore = Number(minScore);
   if (aiProviderPrimary !== undefined) updates.aiProviderPrimary = String(aiProviderPrimary).trim();
@@ -91,7 +96,7 @@ function formatTriageItemForApi(item) {
     threadId: email.threadId || '',
     sender: email.sender,
     subject: email.subject,
-    preview: email.body || '',
+    preview: email.preview || email.body || '',
     
     // Categorisation fields
     category: (item && item.category) || (item && item.primaryCategory) || (email.category) || null,
@@ -138,6 +143,7 @@ class DashboardServer {
     this.eventLogger = null;
     this.manager = null;
     this.categorizationSettings = null;
+    this.graphAuthSessions = new Map();
   }
 
   setEventLogger(eventLogger) {
@@ -379,6 +385,98 @@ class DashboardServer {
       } catch (error) {
         res.status(400).json({ success: false, error: error.message });
       }
+    });
+
+    // Graph authentication endpoint
+    this.app.post('/api/graph-auth/start', async (req, res) => {
+      try {
+        const settings = loadSettings();
+        const input = req.body && typeof req.body === 'object' ? req.body : {};
+        const tenantId = String(input.tenantId || settings.graphTenantId || 'organizations').trim() || 'organizations';
+        const clientId = String(input.clientId || settings.graphClientId || '').trim();
+        const scope = String(input.scope || process.env.GRAPH_SCOPE || 'offline_access openid profile User.Read Mail.ReadWrite').trim();
+
+        if (!clientId) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing Graph Client ID. Set it in Settings before starting authentication.'
+          });
+        }
+
+        const devicePayload = await requestDeviceCode({ tenantId, clientId, scope });
+        const instructions = devicePayload.message
+          || `Open ${devicePayload.verification_uri} and enter code ${devicePayload.user_code}`;
+
+        const sessionId = typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : String(Date.now());
+        const session = {
+          sessionId,
+          status: 'pending',
+          startedAt: new Date().toISOString(),
+          tenantId,
+          verificationUri: String(devicePayload.verification_uri || ''),
+          userCode: String(devicePayload.user_code || ''),
+          instructions,
+          error: '',
+        };
+        this.graphAuthSessions.set(sessionId, session);
+
+        // Continue token polling in background so the UI request returns immediately.
+        void (async () => {
+          try {
+            session.status = 'authorizing';
+            const tokenPayload = await pollForToken({
+              tenantId,
+              clientId,
+              deviceCode: String(devicePayload.device_code || ''),
+              interval: Number(devicePayload.interval || 5),
+              expiresIn: Number(devicePayload.expires_in || 900),
+            });
+            const tokenStore = new GraphTokenStore();
+            const persisted = tokenStore.saveToken(tokenPayload);
+            session.status = 'completed';
+            session.completedAt = new Date().toISOString();
+            session.tokenExpiresAt = persisted && persisted.expires_at ? persisted.expires_at : 0;
+            session.error = '';
+          } catch (error) {
+            session.status = 'failed';
+            session.error = error && error.message ? error.message : 'Graph authorization failed';
+            session.completedAt = new Date().toISOString();
+          }
+        })();
+
+        res.json({
+          success: true,
+          sessionId,
+          status: session.status,
+          instructions,
+          verificationUri: devicePayload.verification_uri || '',
+          userCode: devicePayload.user_code || '',
+          expiresIn: Number(devicePayload.expires_in || 0),
+          interval: Number(devicePayload.interval || 0)
+        });
+      } catch (error) {
+        res.status(400).json({ success: false, error: error.message || 'Graph auth failed' });
+      }
+    });
+
+    this.app.get('/api/graph-auth/status/:sessionId', (req, res) => {
+      const sessionId = String(req.params.sessionId || '').trim();
+      const session = this.graphAuthSessions.get(sessionId);
+      if (!session) {
+        return res.status(404).json({ success: false, error: 'Authentication session not found' });
+      }
+
+      res.json({
+        success: true,
+        sessionId: session.sessionId,
+        status: session.status,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt || '',
+        tokenExpiresAt: session.tokenExpiresAt || 0,
+        error: session.error || '',
+      });
     });
 
     // WebSocket connection handler

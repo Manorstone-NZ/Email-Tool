@@ -8,15 +8,41 @@ function makeDraftId(emailId) {
   return `draft-${emailId}-${nonce}`;
 }
 
-function validateDraftOutput(obj) {
-  const subject = String(obj?.subject || '').trim();
-  const body = String(obj?.body || '').trim();
-  const draftTone = String(obj?.draftTone || 'professional-direct').trim() || 'professional-direct';
-  const questions = Array.isArray(obj?.followUpQuestions)
-    ? obj.followUpQuestions.map((x) => String(x).trim()).filter(Boolean)
-    : [];
+function validateDraftOutput(obj, options = {}) {
+  const allowMissingSubject = Boolean(options.allowMissingSubject);
+  const source = obj && typeof obj === 'object'
+    ? (obj.draft && typeof obj.draft === 'object' ? obj.draft : obj)
+    : {};
 
-  if (!subject) {
+  const subject = String(
+    source.subject
+    || source.subjectLine
+    || source.subject_line
+    || source.draftSubject
+    || ''
+  ).trim();
+  const body = String(
+    source.body
+    || source.draftBody
+    || source.emailBody
+    || source.email_body
+    || source.reply
+    || source.message
+    || source.text
+    || ''
+  ).trim();
+  const draftTone = String(
+    source.draftTone
+    || source.tone
+    || 'professional-direct'
+  ).trim() || 'professional-direct';
+
+  const rawQuestions = source.followUpQuestions ?? source.follow_up_questions ?? [];
+  const questions = Array.isArray(rawQuestions)
+    ? rawQuestions.map((x) => String(x).trim()).filter(Boolean)
+    : (String(rawQuestions || '').trim() ? [String(rawQuestions).trim()] : []);
+
+  if (!subject && !allowMissingSubject) {
     throw new Error('Draft output missing subject');
   }
   if (!body) {
@@ -24,6 +50,74 @@ function validateDraftOutput(obj) {
   }
 
   return { subject, body, draftTone, followUpQuestions: questions };
+}
+
+function buildFallbackSubject(email) {
+  const sourceSubject = String(email && email.subject ? email.subject : '').trim();
+  if (!sourceSubject) {
+    return 'Re: Follow up';
+  }
+  if (/^re:/i.test(sourceSubject)) {
+    return sourceSubject;
+  }
+  return `Re: ${sourceSubject}`;
+}
+
+function buildLocalFallbackDraft(email, priorityDecision) {
+  const sender = String(email && email.sender ? email.sender : '').trim();
+  const subject = buildFallbackSubject(email);
+  const priority = String(priorityDecision && priorityDecision.priority ? priorityDecision.priority : '').trim();
+  const reasonLine = priority ? `Priority noted: ${priority}.` : 'Priority noted from inbox triage.';
+
+  const greeting = sender ? `Hi ${sender},` : 'Hi there,';
+  const body = [
+    greeting,
+    '',
+    `Thanks for your message about "${String(email && email.subject ? email.subject : 'your request').trim() || 'your request'}".`,
+    reasonLine,
+    'I have received this and will follow up shortly with a complete response.',
+    '',
+    'Best regards,',
+  ].join('\n');
+
+  return {
+    subject,
+    body,
+    draftTone: 'professional-direct',
+    followUpQuestions: [],
+  };
+}
+
+function normalizeSignature(signature) {
+  return String(signature || '').replace(/\r\n/g, '\n').trim();
+}
+
+function appendSignature(body, signature) {
+  const normalizedBody = String(body || '').replace(/\r\n/g, '\n').trimEnd();
+  const normalizedSignature = normalizeSignature(signature);
+  if (!normalizedSignature) {
+    return normalizedBody;
+  }
+  const bodyWithoutSignature = stripTrailingSignoff(normalizedBody);
+  if (normalizedBody.endsWith(normalizedSignature)) {
+    return normalizedBody;
+  }
+  if (!bodyWithoutSignature) {
+    return normalizedSignature;
+  }
+  return `${bodyWithoutSignature}\n\n${normalizedSignature}`;
+}
+
+function stripTrailingSignoff(body) {
+  const text = String(body || '').trimEnd();
+  if (!text) {
+    return text;
+  }
+
+  // Remove common closing blocks so configured signature is authoritative.
+  const signoffPattern = /\n\s*\n\s*(best regards|kind regards|regards|sincerely|cheers)[^\n]*\n[\s\S]*$/i;
+  const stripped = text.replace(signoffPattern, '');
+  return stripped.trimEnd();
 }
 
 class DraftService {
@@ -36,6 +130,7 @@ class DraftService {
     });
     this.eventLogger = options.eventLogger || null;
     this.maxDraftLength = Number(options.maxDraftLength || process.env.AI_MAX_DRAFT_LENGTH || 4000);
+    this.emailSignature = normalizeSignature(options.emailSignature || process.env.DRAFT_EMAIL_SIGNATURE || '');
     this.draftsByEmailId = new Map();
   }
 
@@ -43,6 +138,9 @@ class DraftService {
     const systemPrompt = [
       'You draft concise professional email replies.',
       'Return JSON only with fields: subject, body, draftTone, followUpQuestions.',
+      'Write from the mailbox owner perspective (the recipient), never as the original sender.',
+      'If the inbound email describes meetings, onsite visits, or completed work, do not claim you personally performed those actions unless explicitly stated in context.',
+      'Treat names and sign-offs in the inbound email body as external parties unless explicitly identified as the mailbox owner.',
       'Do not invent facts or commitments not present in input.',
       'Avoid legal or pricing promises unless explicitly confirmed.',
       'Ask follow-up questions if key information is missing.',
@@ -50,6 +148,8 @@ class DraftService {
 
     const userPrompt = JSON.stringify({
       task: 'Draft a reply email for human review.',
+      perspective: 'Mailbox owner is responding as an interested third party recipient.',
+      mailboxOwnerSignature: this.emailSignature || null,
       priorityDecision,
       email: {
         sender: email?.sender,
@@ -81,7 +181,10 @@ class DraftService {
 
     try {
       const primaryObj = await this.primary.completeJson(systemPrompt, userPrompt);
-      result = validateDraftOutput(primaryObj);
+      result = validateDraftOutput(primaryObj, { allowMissingSubject: true });
+      if (!String(result.subject || '').trim()) {
+        result.subject = buildFallbackSubject(email);
+      }
       providerUsed = this.primary.name;
     } catch (primaryError) {
       if (this.eventLogger) {
@@ -94,7 +197,10 @@ class DraftService {
 
       try {
         const fallbackObj = await this.fallback.completeJson(systemPrompt, userPrompt);
-        result = validateDraftOutput(fallbackObj);
+        result = validateDraftOutput(fallbackObj, { allowMissingSubject: true });
+        if (!String(result.subject || '').trim()) {
+          result.subject = buildFallbackSubject(email);
+        }
         providerUsed = this.fallback.name;
       } catch (fallbackError) {
         if (this.eventLogger) {
@@ -104,11 +210,23 @@ class DraftService {
             error: fallbackError.message,
           });
         }
-        throw new Error('AI draft unavailable: both providers returned invalid output');
+
+        result = buildLocalFallbackDraft(email, priorityDecision);
+        providerUsed = 'local-fallback-template';
+
+        if (this.eventLogger) {
+          this.eventLogger.logAutomationEvent('email-draft-local-fallback-used', {
+            emailId: key,
+            primaryProvider: this.primary.name,
+            fallbackProvider: this.fallback.name,
+            primaryError: primaryError && primaryError.message ? primaryError.message : 'unknown',
+            fallbackError: fallbackError && fallbackError.message ? fallbackError.message : 'unknown',
+          });
+        }
       }
     }
 
-    const safeBody = result.body.slice(0, this.maxDraftLength);
+    const safeBody = appendSignature(result.body, this.emailSignature).slice(0, this.maxDraftLength);
     const now = new Date().toISOString();
     const draft = {
       draftId: existing ? existing.draftId : makeDraftId(key),

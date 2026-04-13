@@ -161,6 +161,7 @@ class BrowserManager {
       claudeModel: this.settings.aiClaudeModel,
       gemmaModel: this.settings.aiGemmaModel,
       maxDraftLength: this.settings.maxDraftLength,
+      emailSignature: this.settings.emailSignature,
       eventLogger: this.eventLogger,
     });
   }
@@ -448,7 +449,8 @@ class BrowserManager {
       next.aiClaudeModel !== undefined ||
       next.aiOpenAiModel !== undefined ||
       next.aiGemmaModel !== undefined ||
-      next.maxDraftLength !== undefined
+      next.maxDraftLength !== undefined ||
+      next.emailSignature !== undefined
     ) {
       this.refreshAiServices();
       this.emailTriage.priorityService = this.priorityService;

@@ -22,11 +22,77 @@ class GraphEmailExtractor {
     return this.tokenStore.getAccessToken();
   }
 
+  decodeHtmlEntities(text) {
+    const source = String(text || '');
+    const named = {
+      nbsp: ' ',
+      amp: '&',
+      lt: '<',
+      gt: '>',
+      quot: '"',
+      apos: "'",
+    };
+
+    return source.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (_, token) => {
+      if (!token) return _;
+      const lower = token.toLowerCase();
+
+      if (lower[0] === '#') {
+        const isHex = lower[1] === 'x';
+        const numeric = isHex ? parseInt(lower.slice(2), 16) : parseInt(lower.slice(1), 10);
+        return Number.isFinite(numeric) ? String.fromCharCode(numeric) : _;
+      }
+
+      return Object.prototype.hasOwnProperty.call(named, lower) ? named[lower] : _;
+    });
+  }
+
+  htmlToReadableText(html) {
+    let text = String(html || '');
+
+    text = text
+      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '- ')
+      .replace(/<[^>]+>/g, ' ');
+
+    text = this.decodeHtmlEntities(text)
+      .replace(/\r/g, '\n')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n[ \t]+/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\s+([.,!?;:])/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return text;
+  }
+
+  extractBodyText(message) {
+    const fullBody = String(message?.body?.content || '').trim();
+    if (!fullBody) {
+      return String(message?.bodyPreview || '').trim();
+    }
+
+    const contentType = String(message?.body?.contentType || '').toLowerCase();
+    if (contentType === 'html') {
+      return this.htmlToReadableText(fullBody);
+    }
+
+    return fullBody;
+  }
+
   normalizeMessage(message) {
     const sender = message?.from?.emailAddress?.address || '';
     const subject = message?.subject || '';
     const searchQuery = encodeURIComponent([sender, subject].filter(Boolean).join(' '));
     const senderDomain = sender.includes('@') ? sender.split('@')[1].toLowerCase() : '';
+
+    const body = this.extractBodyText(message);
+    const preview = String(message?.bodyPreview || body).slice(0, 200);
 
     return {
       messageId: message?.id || '',
@@ -34,7 +100,8 @@ class GraphEmailExtractor {
       senderEmail: sender.toLowerCase(),
       senderDomain,
       subject,
-      body: (message?.bodyPreview || '').slice(0, 200),
+      body,
+      preview,
       flagged: (message?.flag?.flagStatus || '').toLowerCase() === 'flagged',
       read: Boolean(message?.isRead),
       timestamp: message?.receivedDateTime || new Date().toISOString(),
@@ -62,7 +129,7 @@ class GraphEmailExtractor {
 
     const url = `${this.baseUrl}${userPath}/mailFolders/inbox/messages` +
       `?$top=${this.maxItems}` +
-      '&$select=id,subject,bodyPreview,from,isRead,receivedDateTime,conversationId,flag,webLink';
+      '&$select=id,subject,bodyPreview,body,from,isRead,receivedDateTime,conversationId,flag,webLink';
 
     try {
       const response = await fetch(url, {

@@ -101,12 +101,15 @@ end tell
             return null;
           }
 
+          const body = lines.slice(2).join(' ');
+
           return {
             sender: lines[0],
             senderEmail: lines[0].toLowerCase(),
             senderDomain: lines[0].includes('@') ? lines[0].split('@')[1].toLowerCase() : '',
             subject: lines[1],
-            body: lines.slice(2).join(' ').slice(0, 200),
+            body,
+            preview: body.slice(0, 200),
             flagged: aria.includes('flagged'),
             read: !aria.includes('unread'),
             timestamp: new Date().toISOString(),

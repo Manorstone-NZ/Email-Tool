@@ -128,6 +128,7 @@ describe('manager AI provider wiring', () => {
         aiProviderPrimary: 'openai-gpt54',
         aiProviderFallback: 'claude-opus',
         openaiApiKey: 'sk-openai-initial',
+        anthropicApiKey: 'sk-ant-initial',
         aiOpenAiModel: 'gpt-5.4',
         aiClaudeModel: 'claude-custom',
         aiGemmaModel: 'gemma-custom',
@@ -157,6 +158,7 @@ describe('manager AI provider wiring', () => {
       aiProviderPrimary: 'claude-opus',
       aiProviderFallback: 'openai-gpt54',
       openaiApiKey: 'sk-openai-next',
+      anthropicApiKey: 'sk-ant-next',
       aiOpenAiModel: 'gpt-5.4',
       aiClaudeModel: 'claude-next',
       aiGemmaModel: 'gemma-next',
@@ -168,6 +170,71 @@ describe('manager AI provider wiring', () => {
     expect(manager.priorityService.options.fallbackProvider.apiKey).toBe('sk-openai-next');
     expect(manager.priorityService.options.primaryProvider.model).toBe('claude-next');
     expect(manager.draftService.options.fallbackProvider.model).toBe('gpt-5.4');
+  });
+
+  test('refreshes draft service when only emailSignature changes', () => {
+    jest.doMock('../event-logger', () => jest.fn().mockImplementation(() => ({
+      on: jest.fn(),
+      logAutomationEvent: jest.fn(),
+      logUserEvent: jest.fn(),
+      getEvents: jest.fn(() => []),
+    })));
+    jest.doMock('../chrome-controller', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+      getCurrentURL: jest.fn(() => ''),
+    })));
+    jest.doMock('../chrome-listener', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+    jest.doMock('../dashboard', () => jest.fn().mockImplementation(() => ({
+      setEventLogger: jest.fn(),
+      setManager: jest.fn(),
+      broadcast: jest.fn(),
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+    jest.doMock('../src/email-scorer', () => jest.fn().mockImplementation(() => ({ vipSenders: [] })));
+    jest.doMock('../src/email-triage', () => jest.fn().mockImplementation(function triageCtor() {
+      this.on = jest.fn();
+      this.getLastRunMeta = jest.fn(() => ({}));
+    }));
+    jest.doMock('../src/email-extractor-factory', () => ({
+      createExtractor: jest.fn(() => ({ providerName: 'graph', getInboxEmails: jest.fn() })),
+    }));
+    jest.doMock('../src/vip-config', () => ({
+      loadVipSenders: jest.fn(() => ['ceo@']),
+    }));
+    jest.doMock('../src/send-service', () => jest.fn().mockImplementation(() => ({
+      sendApprovedDraft: jest.fn(),
+    })));
+    jest.doMock('../src/settings-store', () => ({
+      loadSettings: jest.fn(() => ({
+        minScore: 10,
+        vipSenders: ['ceo@'],
+        aiProviderPrimary: 'claude-opus',
+        aiProviderFallback: 'gemma-lmstudio',
+        anthropicApiKey: 'sk-ant-initial',
+        emailSignature: 'Kind regards,\nOld',
+      })),
+    }));
+
+    const PriorityService = jest.fn().mockImplementation(function priorityCtor(options) {
+      this.options = options;
+    });
+    const DraftService = jest.fn().mockImplementation(function draftCtor(options) {
+      this.options = options;
+    });
+
+    jest.doMock('../src/priority-service', () => ({ PriorityService }));
+    jest.doMock('../src/draft-service', () => DraftService);
+
+    const manager = require('../manager');
+    expect(manager.draftService.options.emailSignature).toBe('Kind regards,\nOld');
+
+    manager.applySettings({ emailSignature: 'Kind regards,\nDamian' });
+    expect(manager.draftService.options.emailSignature).toBe('Kind regards,\nDamian');
   });
 
   test('passes configured minScore into triage runs', async () => {

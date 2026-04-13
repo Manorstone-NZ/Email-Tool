@@ -199,10 +199,13 @@ class EmailTriage extends EventEmitter {
   }
 
   _buildTriageItem(email, decision, scoring, actionResult) {
+    const normalizedBody = email.body || email.fullBody || email.preview || '';
+    const preview = email.preview || String(normalizedBody).slice(0, 200);
     const normalizedEmail = {
       ...email,
       sender: email.sender || email.senderEmail || '',
-      body: email.body || email.preview || '',
+      body: normalizedBody,
+      preview,
       category: decision?.category || null,
     };
 
@@ -214,7 +217,7 @@ class EmailTriage extends EventEmitter {
       email: normalizedEmail,
       sender: email.senderEmail,
       subject: email.subject,
-      preview: email.preview,
+      preview,
 
       // Categorisation fields
       category: decision?.category || null,

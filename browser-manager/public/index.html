@@ -129,6 +129,11 @@
                     <input id="setting-tenantId" type="text" name="graphTenantId" placeholder="organizations">
                 </div>
                 <div class="setting-group">
+                    <label>Microsoft Graph Authentication</label>
+                    <button type="button" id="graphAuthButton" class="btn btn-secondary">Authenticate with Microsoft Graph</button>
+                    <small>Opens the device code flow to authorize Graph API access.</small>
+                </div>
+                <div class="setting-group">
                     <label for="setting-minScore">Triage Threshold (%)</label>
                     <input id="setting-minScore" type="number" name="minScore" min="0" max="100">
                 </div>
@@ -148,6 +153,11 @@
                     <label for="setting-vipSenders">VIP Senders</label>
                     <textarea id="setting-vipSenders" name="vipSenders" rows="3" placeholder="ceo@, vp@, director@"></textarea>
                     <small>Comma-separated prefixes or addresses</small>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-emailSignature">Global Email Signature</label>
+                    <textarea id="setting-emailSignature" name="emailSignature" rows="4" placeholder="Kind regards,&#10;Damian"></textarea>
+                    <small>Appended to AI-generated draft replies.</small>
                 </div>
                 <div class="setting-group">
                     <label for="setting-aiPrimary">AI Primary Provider</label>
