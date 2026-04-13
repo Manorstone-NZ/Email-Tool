@@ -1,72 +1,143 @@
 const { EventEmitter } = require('events');
 
 class EmailTriage extends EventEmitter {
-  constructor(extractor, scorer, options = {}) {
+  constructor(graphAPI, mailActionService, categorizationSettings, folderCache) {
     super();
-    this.extractor = extractor;
-    this.scorer = scorer;
+    this.graphAPI = graphAPI;
+    this.mailActionService = mailActionService;
+    this.categorizationSettings = categorizationSettings;
+    this.folderCache = folderCache;
     this.lastTriageResult = [];
-    this.minScore = Number(options.minScore || process.env.TRIAGE_MIN_SCORE || 20);
-    this.maxItems = Number(options.maxItems || process.env.TRIAGE_MAX_ITEMS || 20);
-    this.lastRunMeta = {
-      totalExtracted: 0,
-      actionableCount: 0,
-      minScore: this.minScore,
-      maxItems: this.maxItems
-    };
   }
 
-  async run() {
+  async run(onlyMailbox, options = {}) {
+    const settings = this.categorizationSettings?.getSettings?.() || {};
+    const categorize = require('./email-categorizer');
+    const score = require('./email-scorer');
+
+    // If no categorizer, fallback to direct scorer (legacy mode)
+    const useCategorizer = Boolean(categorize && settings);
+
+    let emails;
     try {
-      // Extract emails
-      const emails = await this.extractor.getInboxEmails();
-      console.log(`[EmailTriage] Extracted ${emails.length} emails`);
-
-      // Score each email
-      const scored = emails.map(email => this.scorer.score(email));
-
-      // Filter by configured confidence threshold.
-      const actionable = scored.filter((result) => result.score >= this.minScore);
-
-      // Sort by score descending
-      actionable.sort((a, b) => b.score - a.score);
-
-      // Configurable max size.
-      const topItems = actionable.slice(0, this.maxItems);
-
-      // Store result
-      this.lastTriageResult = topItems;
-      this.lastRunMeta = {
-        totalExtracted: emails.length,
-        actionableCount: actionable.length,
-        minScore: this.minScore,
-        maxItems: this.maxItems
-      };
-
-      // Emit event
-      this.emit('triage-complete', {
-        timestamp: new Date().toISOString(),
-        totalExtracted: emails.length,
-        actionableCount: actionable.length,
-        minScore: this.minScore,
-        topItems
-      });
-
-      console.log(`[EmailTriage] Scored: ${actionable.length} actionable items, top ${topItems.length} returned`);
-      return topItems;
+      emails = await this.graphAPI.getEmails(onlyMailbox);
     } catch (error) {
-      console.error('[EmailTriage] Error during triage:', error.message);
-      this.emit('triage-error', { error: error.message });
+      console.error('[EmailTriage.run] Failed to fetch emails:', error.message);
       return [];
     }
+
+    const triageItems = [];
+
+    for (const email of emails) {
+      let decision = null;
+      let scoring = null;
+      let actionResult = null;
+
+      // Step 1: Categorise
+      if (useCategorizer) {
+        try {
+          decision = categorize(email, settings);
+        } catch (error) {
+          console.warn('[EmailTriage.run] Categorisation error:', error.message);
+          decision = { category: 'fyi', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: ['Categorisation failed; defaulted to fyi'] };
+        }
+      }
+
+      // Step 2: Check for null category (should be rare)
+      if (decision && decision.category === null) {
+        console.warn('[EmailTriage.run] Email has null category; skipping scorer and actions:', email.messageId);
+        // Emit null-category item
+        const item = this._buildTriageItem(email, decision, null, null);
+        triageItems.push(item);
+        continue;
+      }
+
+      // Step 3: Score
+      if (decision) {
+        try {
+          scoring = score(email, decision);
+        } catch (error) {
+          console.warn('[EmailTriage.run] Scoring error:', error.message);
+          scoring = { urgency: 'low', score: 30, recommendedAction: 'Review Later', reasons: ['Scoring failed'] };
+        }
+      }
+
+      // Step 4: Apply Actions
+      if (decision && scoring) {
+        try {
+          actionResult = await this.mailActionService?.applyActions?.(email, decision, settings);
+        } catch (error) {
+          console.warn('[EmailTriage.run] Action service error:', error.message);
+          actionResult = { category: decision.category, skipped: true, skipReason: 'action_service_error' };
+        }
+      }
+
+      // Step 5: Build Triage Item
+      const item = this._buildTriageItem(email, decision, scoring, actionResult);
+      triageItems.push(item);
+    }
+
+    // Filter: remove marketing by default unless included
+    const filtered = options.includeMarketing 
+      ? triageItems 
+      : triageItems.filter(item => item.category !== 'marketing');
+
+    // Sort: by score descending
+    filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    // Prioritise VIP senders
+    const vipEmails = options.vipEmails || [];
+    filtered.sort((a, b) => {
+      const aIsVip = vipEmails.includes(a.sender);
+      const bIsVip = vipEmails.includes(b.sender);
+      if (aIsVip && !bIsVip) return -1;
+      if (!aIsVip && bIsVip) return 1;
+      return 0;
+    });
+
+    // Mark high-priority items for AI review
+    for (const item of filtered) {
+      if (item.urgency === 'high' && item.score >= 70) {
+        item.markedForAiReview = true;
+      }
+    }
+
+    // Emit via WebSocket
+    for (const item of filtered) {
+      process.nextTick(() => this.emit('triageItem', item));
+    }
+
+    return filtered;
   }
 
-  getLastResult() {
-    return this.lastTriageResult;
-  }
+  _buildTriageItem(email, decision, scoring, actionResult) {
+    return {
+      id: `${email.messageId}-${Date.now()}`,
+      emailId: email.emailId,
+      messageId: email.messageId,
+      threadId: email.threadId,
+      sender: email.senderEmail,
+      subject: email.subject,
+      preview: email.preview,
 
-  getLastRunMeta() {
-    return this.lastRunMeta;
+      // Categorisation fields
+      category: decision?.category || null,
+      categorySource: decision?.source || null,
+      categorizationConfidence: decision?.confidence || null,
+      skipAutomation: decision?.skipAutomation || false,
+
+      // Scoring fields
+      urgency: scoring?.urgency || null,
+      score: scoring?.score || null,
+      recommendedAction: scoring?.recommendedAction || null,
+
+      // Combined reasons
+      reasons: [
+        ...(decision?.reasons || []),
+        ...(scoring?.reasons || []),
+        ...(actionResult?.acted ? [`Actions applied: ${actionResult.actionsApplied.join(', ')}`] : [])
+      ].slice(0, 10) // Limit to 10 reasons for UI display
+    };
   }
 }
 

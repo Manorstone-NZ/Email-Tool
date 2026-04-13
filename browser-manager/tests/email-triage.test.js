@@ -1,91 +1,125 @@
 const EmailTriage = require('../src/email-triage');
-const EmailExtractor = require('../src/email-extractor');
-const EmailScorer = require('../src/email-scorer');
 
 describe('EmailTriage', () => {
-  let triage;
-  let mockExtractor;
-  let mockScorer;
+  let emailTriage, mockGraphAPI, mockActionService, mockSettings;
 
   beforeEach(() => {
-    mockExtractor = new EmailExtractor();
-    mockScorer = new EmailScorer();
-    triage = new EmailTriage(mockExtractor, mockScorer);
-  });
+    jest.clearAllMocks();
+    jest.resetModules();
 
-  test('run should score and filter emails', async () => {
-    // Mock extractor
-    mockExtractor.getInboxEmails = jest.fn().mockResolvedValue([
-      {
-        sender: 'alice@company.com',
-        subject: 'Budget Approval Needed',
-        body: 'Can you approve the Q2 budget?',
-        flagged: true,
-        read: false,
-        timestamp: new Date().toISOString(),
-        threadId: 'thread_1'
-      },
-      {
-        sender: 'newsletter@example.com',
-        subject: 'Weekly Digest',
-        body: 'Here are this week\'s stories',
-        flagged: false,
-        read: true,
-        timestamp: new Date().toISOString(),
-        threadId: 'thread_2'
+    mockGraphAPI = {
+      getEmails: jest.fn().mockResolvedValue([
+        {
+          messageId: 'msg_1',
+          emailId: 'id_1',
+          threadId: 'thread_1',
+          senderEmail: 'boss@example.com',
+          subject: 'Urgent - Budget Approval',
+          preview: 'Can you approve the Q2 budget?',
+        },
+        {
+          messageId: 'msg_2',
+          emailId: 'id_2',
+          threadId: 'thread_2',
+          senderEmail: 'newsletter@example.com',
+          subject: 'Weekly Digest',
+          preview: 'Here are this week\'s stories',
+        }
+      ]),
+    };
+
+    mockActionService = {
+      applyActions: jest.fn().mockResolvedValue({
+        category: 'todo',
+        skipped: false,
+        actionsApplied: [],
+      }),
+    };
+
+    mockSettings = {
+      getSettings: jest.fn().mockReturnValue({
+        topicLabelsGloballyEnabled: true,
+        categories: { todo: { enabled: true }, fyi: { enabled: true } },
+        topicLabels: [],
+        customRules: [],
+      }),
+    };
+
+    jest.doMock('../src/email-categorizer', () => (email) => {
+      if (email.subject && email.subject.includes('urgent')) {
+        return { category: 'todo', skipAutomation: false, source: 'heuristic', confidence: 0.8, reasons: [] };
       }
-    ]);
-
-    const results = await triage.run();
-    expect(Array.isArray(results)).toBe(true);
-    expect(results.length).toBeLessThanOrEqual(10);
-    expect(results[0].score).toBeGreaterThanOrEqual(40); // Min confidence
-  });
-
-  test('run should sort by score descending', async () => {
-    mockExtractor.getInboxEmails = jest.fn().mockResolvedValue([
-      {
-        sender: 'bob@example.com',
-        subject: 'Low Priority',
-        body: 'Just FYI',
-        flagged: false,
-        read: true,
-        timestamp: new Date().toISOString(),
-        threadId: 'thread_1'
-      },
-      {
-        sender: 'ceo@company.com',
-        subject: 'Urgent Decision',
-        body: 'I need your approval on this. Can you decide by EOD?',
-        flagged: true,
-        read: false,
-        timestamp: new Date().toISOString(),
-        threadId: 'thread_2'
-      }
-    ]);
-
-    const results = await triage.run();
-    if (results.length > 1) {
-      expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
-    }
-  });
-
-  test('run should use configurable minimum score threshold', async () => {
-    triage = new EmailTriage(mockExtractor, mockScorer, { minScore: 35 });
-
-    mockExtractor.getInboxEmails = jest.fn().mockResolvedValue([
-      { sender: 'a@b.com', subject: 'one', body: 'x', flagged: false, read: true, timestamp: new Date().toISOString(), threadId: '1' }
-    ]);
-    mockScorer.score = jest.fn().mockReturnValue({
-      email: { sender: 'a@b.com', subject: 'one', body: 'x', openUrl: 'https://outlook.office.com/mail/search?q=one' },
-      score: 36,
-      action: 'Review Later',
-      reason: 'Direct ask for action',
-      signals: { primary: 20, secondary: 10, weak: 6, exclusion: 0 }
+      return { category: 'fyi', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: [] };
     });
 
-    const results = await triage.run();
-    expect(results.length).toBe(1);
-    expect(results[0].score).toBe(36);
+    jest.doMock('../src/email-scorer', () => (email, decision) => {
+      if (decision.category === 'todo') {
+        return { urgency: 'high', score: 75, recommendedAction: 'Reply', reasons: [] };
+      }
+      return { urgency: 'low', score: 35, recommendedAction: 'Review Later', reasons: [] };
+    });
+
+    const folderCache = { 'Inbox': 'inbox_folder' };
+    emailTriage = new EmailTriage(mockGraphAPI, mockActionService, mockSettings, folderCache);
+  });
+
+  test('run() returns TriageItems with all required fields', async () => {
+    const result = await emailTriage.run();
+    expect(result.length).toBeGreaterThan(0);
+    const item = result[0];
+    expect(item).toHaveProperty('id');
+    expect(item).toHaveProperty('category');
+    expect(item).toHaveProperty('urgency');
+    expect(item).toHaveProperty('score');
+    expect(item).toHaveProperty('reasons');
+  });
+
+  test('run() should filter out marketing by default', async () => {
+    jest.resetModules();
+    mockGraphAPI.getEmails.mockResolvedValueOnce([
+      { messageId: 'msg_1', emailId: 'id_1', threadId: 'thread_1', senderEmail: 'x@y.com', subject: 'Test', preview: '' },
+      { messageId: 'msg_2', emailId: 'id_2', threadId: 'thread_2', senderEmail: 'z@y.com', subject: 'Promo', preview: '' },
+    ]);
+
+    jest.doMock('../src/email-categorizer', () => (email) => {
+      if (email.subject === 'Promo') {
+        return { category: 'marketing', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: [] };
+      }
+      return { category: 'fyi', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: [] };
+    });
+
+    jest.doMock('../src/email-scorer', () => () => ({ urgency: 'low', score: 35, recommendedAction: 'Review Later', reasons: [] }));
+
+    const EmailTriageReloaded = require('../src/email-triage');
+    const triage = new EmailTriageReloaded(mockGraphAPI, mockActionService, mockSettings, {});
+    const result = await triage.run();
+    expect(result.some(item => item.category === 'marketing')).toBe(false);
+  });
+
+  test('run() should prioritise VIP senders', async () => {
+    mockGraphAPI.getEmails.mockResolvedValueOnce([
+      { messageId: 'msg_1', emailId: 'id_1', threadId: 'thread_1', senderEmail: 'regular@y.com', subject: 'Info', preview: '' },
+      { messageId: 'msg_2', emailId: 'id_2', threadId: 'thread_2', senderEmail: 'vip@y.com', subject: 'VIP', preview: '' },
+    ]);
+
+    const result = await emailTriage.run(undefined, { vipEmails: ['vip@y.com'] });
+    expect(result[0].sender).toBe('vip@y.com');
+  });
+
+  test('run() should handle null category', async () => {
+    jest.resetModules();
+    mockGraphAPI.getEmails.mockResolvedValueOnce([
+      { messageId: 'msg_1', emailId: 'id_1', threadId: 'thread_1', senderEmail: 'test@y.com', subject: 'Test', preview: '' },
+    ]);
+
+    jest.doMock('../src/email-categorizer', () => () => ({ category: null, source: null, confidence: null, skipAutomation: false, reasons: [] }));
+    jest.doMock('../src/email-scorer', () => () => ({ urgency: 'low', score: 35, recommendedAction: 'Review Later', reasons: [] }));
+
+    const EmailTriageReloaded = require('../src/email-triage');
+    const triage = new EmailTriageReloaded(mockGraphAPI, mockActionService, mockSettings, {});
+    const result = await triage.run();
+    expect(result[0].category).toBe(null);
+    expect(result[0].urgency).toBe(null);
+    expect(result[0].score).toBe(null);
   });
 });
