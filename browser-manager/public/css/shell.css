@@ -1,0 +1,114 @@
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  background: var(--bg-canvas);
+}
+
+.icon-rail {
+  background: var(--bg-rail);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 0;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.icon-rail__brand {
+  width: 32px;
+  height: 32px;
+  background: var(--accent-ai);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.875rem;
+}
+
+.icon-rail__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nav-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.nav-icon svg { stroke: var(--text-muted); transition: stroke 0.15s; }
+.nav-icon:hover svg { stroke: var(--text-tertiary); }
+
+.nav-icon.is-active {
+  background: var(--bg-muted);
+}
+
+.nav-icon.is-active svg { stroke: var(--accent-brand); }
+
+.nav-icon.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--accent-ai);
+  border-radius: 0 2px 2px 0;
+}
+
+.icon-rail__status {
+  margin-top: auto;
+  margin-bottom: 14px;
+}
+
+.graph-status-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+}
+
+.graph-status-btn .status-dot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  border: 2px solid var(--bg-rail);
+}
+
+.portal-main {
+  width: 100%;
+  overflow-y: auto;
+}
+
+[data-view] {
+  animation: view-in 0.15s ease;
+}
+
+@keyframes view-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.app-sidebar-toggle { display: none; }

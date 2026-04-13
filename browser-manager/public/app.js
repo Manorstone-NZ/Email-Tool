@@ -1628,19 +1628,11 @@ function isMobileReaderViewport() {
   return window.innerWidth <= 767;
 }
 
-function setSidebarOpen(isOpen) {
-  document.body.classList.toggle('sidebar-open', Boolean(isOpen));
-  const toggleBtn = document.getElementById('sidebarToggleBtn');
-  if (toggleBtn) {
-    toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  }
-}
+// setSidebarOpen / closeSidebarOnCompactViewport retained as stubs —
+// the old 240px sidebar is replaced by the icon rail (no open/close state needed).
+function setSidebarOpen(_isOpen) { /* no-op: icon rail has no open/close state */ }
 
-function closeSidebarOnCompactViewport() {
-  if (isCompactViewport()) {
-    setSidebarOpen(false);
-  }
-}
+function closeSidebarOnCompactViewport() { /* no-op: icon rail always visible */ }
 
 function toggleFilterValue(currentValue, nextValue) {
   const next = nextValue || null;
@@ -1782,15 +1774,6 @@ let dashboard = null;
 document.addEventListener('DOMContentLoaded', () => {
   dashboard = new DashboardClient();
   dashboard.connect();
-
-  document.addEventListener('click', (event) => {
-    const toggle = event.target.closest('#sidebarToggleBtn');
-    if (!toggle) {
-      return;
-    }
-    const isOpen = document.body.classList.contains('sidebar-open');
-    setSidebarOpen(!isOpen);
-  });
 
   // Periodically query events if not connected via WebSocket
   setInterval(() => {
