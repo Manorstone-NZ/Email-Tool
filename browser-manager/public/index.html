@@ -31,44 +31,27 @@
 
         <main class="portal-main">
         <section id="view-email" class="email-workspace" data-view="email">
-            <aside class="email-filter-rail" data-region="filter-rail">
-                <div class="rail-section">
-                    <h3 class="rail-heading">Categories</h3>
-                    <ul class="rail-list" id="categoryList">
-                        <li><button type="button" class="rail-filter is-active" data-category="">All</button></li>
-                        <li><button type="button" class="rail-filter" data-category="Needs Reply">Needs Reply <span class="rail-count" id="count-cat-needs-reply"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-category="Waiting on Others">Waiting on Others <span class="rail-count" id="count-cat-waiting"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-category="FYI">FYI <span class="rail-count" id="count-cat-fyi"></span></button></li>
-                    </ul>
-                </div>
-                <div class="rail-section">
-                    <h3 class="rail-heading">State</h3>
-                    <ul class="rail-list" id="stateList">
-                        <li><button type="button" class="rail-filter is-active" data-state="">All</button></li>
-                        <li><button type="button" class="rail-filter" data-state="Flagged">Flagged <span class="rail-count" id="count-state-flagged"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-state="Pinned">Pinned <span class="rail-count" id="count-state-pinned"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-state="Done">Done <span class="rail-count" id="count-state-done"></span></button></li>
-                    </ul>
-                </div>
-                <div class="rail-section">
-                    <h3 class="rail-heading">Tags</h3>
-                    <ul class="rail-list" id="tagList">
-                        <li><button type="button" class="rail-filter" data-tag="">All Tags</button></li>
-                    </ul>
-                </div>
-            </aside>
-
-            <div class="email-inbox-list" data-region="inbox-list">
+            <div class="email-list-panel" data-region="inbox-list">
                 <div class="email-toolbar">
-                    <input type="search" id="emailSearch" placeholder="Search emails..." class="email-search-input">
-                    <button type="button" id="triageRefreshBtn" class="btn btn-primary">Refresh</button>
+                    <div class="email-search-wrap">
+                        <svg class="email-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="search" id="emailSearch" placeholder="Search emails..." class="email-search-input form-input">
+                        <button type="button" id="emailSearchClear" class="email-search-clear" hidden>&times;</button>
+                    </div>
+                    <button type="button" id="triageRefreshBtn" class="btn btn--icon btn--secondary" aria-label="Refresh">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    </button>
                 </div>
+                <div class="filter-bar" id="filterBar">
+                    <div class="filter-bar__categories" id="categoryPills"></div>
+                    <div class="filter-bar__state" id="statePills"></div>
+                </div>
+                <div id="toastArea" class="toast-area"></div>
                 <p id="triageStatus" class="triage-status"></p>
                 <div id="triageList" class="email-list"></div>
                 <div id="emailEmptyState" class="empty-state" hidden>No emails found.</div>
             </div>
-
-            <section id="readerPane" class="email-reader-pane" data-region="reader-pane" aria-label="Email reader pane"></section>
+            <section id="readerPane" class="reader-pane" data-region="reader-pane" aria-label="Email reader pane"></section>
         </section>
 
         <section id="view-logs" data-view="logs" hidden>

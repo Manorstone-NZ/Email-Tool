@@ -1,6 +1,25 @@
 (() => {
 let constants = {
   RECOMMENDED_ACTIONS: ['Review Later', 'Review / Respond', 'Approve / Decide', 'Review'],
+  AVATAR_PALETTE: [
+    { bg: '#e8d5c4', fg: '#8b6a4f' },
+    { bg: '#c4d5e8', fg: '#4f6a8b' },
+    { bg: '#d4c4e8', fg: '#6a4f8b' },
+    { bg: '#c4e0d8', fg: '#3d7a65' },
+    { bg: '#e8dcc4', fg: '#8b7a4f' },
+    { bg: '#e8c4c4', fg: '#8b4f4f' },
+  ],
+  HEAT_GRADIENT_THRESHOLDS: [
+    { min: 80, color: '#c0564a' },
+    { min: 60, color: '#d4a030' },
+    { min: 40, color: '#d4a574' },
+    { min: 0,  color: '#e0dbd4' },
+  ],
+  PRIORITY_TIERS: [
+    { key: 'act-now', label: 'Act Now', criteria: (item) => item.urgency === 'high' && (item.score || 0) >= 70 },
+    { key: 'review', label: 'Review', criteria: (item) => item.urgency === 'medium' || (item.urgency === 'high' && (item.score || 0) < 70) },
+    { key: 'low', label: 'Low Priority', criteria: (item) => item.urgency === 'low' || (!item.urgency) },
+  ],
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -265,7 +284,38 @@ function warnIfLargeEmailList(items, warnFn) {
 }
 
 function getCategoryColor(category) {
-  return CATEGORY_COLORS[String(category || '')] || '#4d5f7a';
+  const map = {
+    'Needs Reply': { fg: '#9b3c3c', bg: '#fef0f0', border: '#f5d0d0', accent: '#c0564a' },
+    'Waiting on Others': { fg: '#8b6a2f', bg: '#fef8ec', border: '#f0e0c0', accent: '#b8860b' },
+    'FYI': { fg: '#4a6380', bg: '#eef3f8', border: '#d4e0ec', accent: '#4a6380' },
+    'Notification': { fg: '#777060', bg: '#f0f0ec', border: '#e0e0d8', accent: '#777060' },
+    'Marketing': { fg: '#7a6088', bg: '#f5f0f8', border: '#e0d8e8', accent: '#7a6088' },
+  };
+  return map[category] || { fg: '#777', bg: '#f5f3f0', border: '#e0dbd4', accent: '#999' };
+}
+
+function avatarColor(name) {
+  const str = (name || '').trim();
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  return constants.AVATAR_PALETTE[Math.abs(hash) % constants.AVATAR_PALETTE.length];
+}
+
+function scoreToHeatColor(score) {
+  const s = typeof score === 'number' ? score : 0;
+  for (const t of constants.HEAT_GRADIENT_THRESHOLDS) {
+    if (s >= t.min) return t.color;
+  }
+  return constants.HEAT_GRADIENT_THRESHOLDS[constants.HEAT_GRADIENT_THRESHOLDS.length - 1].color;
+}
+
+function groupByPriorityTier(items) {
+  const groups = constants.PRIORITY_TIERS.map(tier => ({ ...tier, items: [] }));
+  for (const item of items) {
+    const group = groups.find(g => g.criteria(item)) || groups[groups.length - 1];
+    group.items.push(item);
+  }
+  return groups.filter(g => g.items.length > 0);
 }
 
 function getPrioritizedReaderMetadata(item, options) {
@@ -327,6 +377,9 @@ const api = {
   warnIfLargeEmailList,
   getCategoryColor,
   getPrioritizedReaderMetadata,
+  avatarColor,
+  scoreToHeatColor,
+  groupByPriorityTier,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
