@@ -1,10 +1,26 @@
 describe('Shell layout route contract', () => {
+  let originalGlobals;
+
   beforeEach(() => {
+    originalGlobals = {
+      fetch: global.fetch,
+      WebSocket: global.WebSocket,
+      setInterval: global.setInterval,
+      clearInterval: global.clearInterval,
+    };
+
     window.location.hash = '';
   });
 
   afterEach(() => {
+    restoreGlobal('fetch', originalGlobals.fetch);
+    restoreGlobal('WebSocket', originalGlobals.WebSocket);
+    restoreGlobal('setInterval', originalGlobals.setInterval);
+    restoreGlobal('clearInterval', originalGlobals.clearInterval);
+
+    jest.restoreAllMocks();
     window.location.hash = '';
+    document.body.innerHTML = '';
   });
 
   test('defaults unknown hash to email route', async () => {
@@ -22,6 +38,26 @@ describe('Shell layout route contract', () => {
 
 async function bootstrapApp() {
   jest.resetModules();
+
+  const domContentLoadedHandlers = [];
+  const originalDocumentAddEventListener = document.addEventListener.bind(document);
+  document.addEventListener = (type, listener, options) => {
+    if (type === 'DOMContentLoaded') {
+      domContentLoadedHandlers.push(listener);
+      return;
+    }
+
+    originalDocumentAddEventListener(type, listener, options);
+  };
+
+  const originalWindowAddEventListener = window.addEventListener.bind(window);
+  window.addEventListener = (type, listener, options) => {
+    if (type === 'hashchange') {
+      return;
+    }
+
+    originalWindowAddEventListener(type, listener, options);
+  };
 
   document.body.innerHTML = `
     <nav class="portal-nav">
@@ -97,15 +133,32 @@ async function bootstrapApp() {
 
   global.setInterval = jest.fn(() => 1);
 
-  require('../../public/app.js');
-  document.dispatchEvent(new Event('DOMContentLoaded'));
+  try {
+    require('../../public/app.js');
+  } finally {
+    document.addEventListener = originalDocumentAddEventListener;
+    window.addEventListener = originalWindowAddEventListener;
+  }
+
+  domContentLoadedHandlers.forEach((listener) => {
+    listener.call(document, new Event('DOMContentLoaded'));
+  });
   await Promise.resolve();
 }
 
 function getActiveRoute() {
-  return document.querySelector('[data-region="app-sidebar"] [data-route].is-active')?.dataset.route || null;
+  return document.querySelector('.portal-nav [data-route].is-active')?.dataset.route || null;
 }
 
 function getSidebarRouteLabels() {
-  return Array.from(document.querySelectorAll('[data-region="app-sidebar"] [data-route]')).map((node) => node.textContent.trim());
+  return Array.from(document.querySelectorAll('.portal-nav [data-route]')).map((node) => node.textContent.trim());
+}
+
+function restoreGlobal(name, value) {
+  if (typeof value === 'undefined') {
+    delete global[name];
+    return;
+  }
+
+  global[name] = value;
 }
