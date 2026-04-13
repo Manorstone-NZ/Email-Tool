@@ -1,0 +1,12 @@
+{
+  "topicLabelsGloballyEnabled": true,
+  "categories": {
+    "todo": { "enabled": false, "topicLabelsEnabled": true },
+    "fyi": { "enabled": false, "topicLabelsEnabled": true },
+    "to_follow_up": { "enabled": false, "topicLabelsEnabled": true },
+    "notification": { "enabled": false, "topicLabelsEnabled": true },
+    "marketing": { "enabled": false, "topicLabelsEnabled": true }
+  },
+  "topicLabels": [],
+  "customRules": []
+}
