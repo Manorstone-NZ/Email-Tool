@@ -10,9 +10,12 @@ A comprehensive visual and functional overhaul of all three views (Email, Settin
 
 Key changes:
 - **Shell**: Full sidebar → 56px icon rail
-- **Email list**: Large cards with action buttons → medium-density scannable rows
+- **Email list**: Large cards with action buttons → medium-density scannable rows with smart priority grouping
+- **Scoring**: Raw percentage → smart priority tiers (Act Now / Review / Low Priority) with heat-gradient borders
 - **Drafts**: Modal dialog → inline editing in the reader pane
 - **Categories**: Sidebar filter rail → horizontal pill bar with counts
+- **Tags**: Hidden in filter rail → visible pills on rows + filterable via popover
+- **Search**: Basic input → real-time filtering with clear state indicators
 - **Settings**: Flat form → tabbed card layout with Graph connection status
 - **Categorization**: Raw lists → visual tag builder and IF/THEN rule editor with live match counts
 - **Logs**: Plain table → summary stats + contextual entries with filter pills
@@ -64,6 +67,21 @@ Key changes:
 | FYI | `#4a6380` |
 | Notification | `#777060` |
 | Marketing | `#7a6088` |
+
+**Score Heat Gradient:**
+| Token | Value | Score Range | Usage |
+|-------|-------|-------------|-------|
+| `--score-hot` | `#c0564a` | 80–100 | Highest priority heat border + dot |
+| `--score-warm` | `#d4a030` | 60–79 | Medium-high priority |
+| `--score-mild` | `#d4a574` | 40–59 | Medium priority |
+| `--score-cool` | `#e0dbd4` | 20–39 | Low priority |
+
+**Priority Tier Backgrounds:**
+| Token | Value | Usage |
+|-------|-------|-------|
+| `--tier-act-now-bg` | `#fef0f0` | Act Now section header tint |
+| `--tier-review-bg` | `#fef8ec` | Review section header tint |
+| `--tier-low-bg` | `#f5f3f0` | Low Priority section header tint |
 
 **Special:**
 | Token | Value | Usage |
@@ -214,9 +232,23 @@ Three-region layout within the portal main area:
 
 The email workspace is `display: grid; grid-template-columns: minmax(320px, 380px) minmax(420px, 1fr);` (the icon rail is outside the workspace, part of the shell).
 
-### 3.2 Category Filter Bar
+### 3.2 Search Bar
 
-Replaces the 260px filter rail sidebar. Sits at the top of the email list panel.
+Sits at the very top of the email list panel.
+
+**Layout:** Pill-shaped input (`border-radius: var(--radius-pill)`) with search icon on the left, flex-1. Refresh button (icon-only, 34px square, rounded) to the right.
+
+**Behavior:**
+- Filters the email list in real-time as the user types (debounced 300ms).
+- Searches across sender name, subject, and preview text (client-side, same as current implementation).
+- Works in combination with category, state, and tag filters (AND logic — all filters apply together).
+- When a search is active, a clear button (X icon) appears inside the input on the right.
+
+**Empty search results:** "No emails match your search" centered with muted text in the warm empty-state style.
+
+### 3.3 Category & State Filter Bar
+
+Replaces the 260px filter rail sidebar. Sits below the search bar.
 
 **Row 1 — Category pills:**
 - Horizontal row: `All (count)`, `Needs Reply (count)`, `Waiting (count)`, `FYI (count)`.
@@ -224,44 +256,81 @@ Replaces the 260px filter rail sidebar. Sits at the top of the email list panel.
 - "All" uses `var(--accent-brand)` when active (dark pill).
 - Counts are inline, slightly lower opacity.
 
-**Row 2 — State filters:**
+**Row 2 — State + tag filters:**
 - Smaller ghost-style pills: `Flagged`, `Pinned`, `Done`.
-- A filter icon button on the right opens a popover for tag filtering.
+- A filter icon button on the right opens a **tag filter popover**.
 - Separated from category pills by 4px vertical gap.
 - Divider line (`var(--border-subtle)`) below this row.
 
-**Search bar:** Sits above the category pills.
-- Pill-shaped input (`border-radius: var(--radius-pill)`) with search icon.
-- Refresh button (icon-only, 34px square, rounded) to the right of search.
+**Tag filter popover:**
+- Triggered by the filter icon button.
+- Shows all available tags (derived from current triage items) as toggleable pills.
+- Multiple tags can be selected (OR logic within tags — email matches if it has ANY selected tag).
+- When tag filters are active, the selected tags appear as small pills inline in the filter bar (between state pills and the filter icon), so the user can see what's active and click to remove.
 
-### 3.3 Email List Rows
+### 3.4 Smart Priority Grouping & Scoring
+
+The email list is organized into priority tiers derived from the existing scoring system (`email-scorer.js`). The scorer produces a 0–100 score and an urgency level (high/medium/low) from category + source type + confidence.
+
+**Priority tiers:**
+
+| Tier | Criteria | Visual Treatment |
+|------|----------|-----------------|
+| **Act Now** | urgency `high` AND score ≥ 70 | Section header with warm rose tint (`#fef0f0`), bold label "Act Now" with count. Rose left-border on rows. |
+| **Review** | urgency `medium` OR (urgency `high` AND score < 70) | Section header with amber tint (`#fef8ec`), label "Review" with count. Amber left-border on rows. |
+| **Low Priority** | urgency `low` | Section header with muted tint (`#f5f3f0`), label "Low Priority" with count. Neutral left-border on rows. |
+
+**Section headers:** Lightweight dividers between groups — not heavy cards. A thin horizontal line with the tier label (11px uppercase, tier color) and count on the left. Collapsible — clicking the header toggles the section open/closed (all open by default).
+
+**Heat-gradient left border:** Each email row gets a 3px left border whose color maps to its score:
+- 80–100: warm rose `#c0564a`
+- 60–79: amber `#d4a030`
+- 40–59: warm gold `#d4a574`
+- 20–39: neutral `#e0dbd4`
+
+This provides an instant visual sense of priority within each group.
+
+**Score indicator in the row:** A small filled-dot indicator (8px) next to the timestamp, using the same heat-gradient color scale. Subtle but visible — communicates score without showing a raw number. Full score details (numeric score, urgency, recommended action, scoring reasons) are shown in the reader pane metadata.
+
+**Within each tier:** Emails are sorted by score descending (highest first), preserving the current sort behavior.
+
+**Settings controls:**
+- The existing `minScore` threshold control is retained (renamed to "Priority threshold" with description "Hide emails scoring below this value").
+- New toggle: **"Group by priority"** (on/off). When off, the list displays as a flat score-sorted list with the heat-gradient borders but no tier section headers. Default: on.
+
+**Interaction with filters:** Category, state, tag, and search filters apply BEFORE grouping. If you filter to "Needs Reply" only, the visible emails are grouped into tiers based on their individual scores. Empty tiers are hidden.
+
+### 3.5 Email List Rows
 
 Medium-density two-line rows replacing the current large cards.
 
 **Structure per row:**
 ```
-[Avatar 36px] [Content area]
-                Line 1: Sender (semibold) + Category pill (small) + Timestamp (right-aligned, muted)
-                Line 2: Subject (medium weight) + " — " + Preview snippet (muted, truncated)
+[Heat border 3px] [Avatar 36px] [Content area]
+                                  Line 1: Sender (semibold) + Category pill (small) + [Tag pills if any] + Score dot + Timestamp (right-aligned, muted)
+                                  Line 2: Subject (medium weight) + " — " + Preview snippet (muted, truncated)
 ```
+
+**Tag pills in rows:** If the email has tags, they appear as small ghost-style pills (10px font, `background: var(--bg-rail); color: var(--text-tertiary); border-radius: var(--radius-pill); padding: 1px 7px;`) after the category pill on line 1. Maximum 2 visible — if more, show "+N" overflow indicator.
 
 **Styling:**
 - `background: var(--bg-surface); border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 4px;`
-- No visible border by default (border: 1px solid transparent).
+- Left border: 3px solid, color from heat-gradient scale based on score.
+- No other visible border by default (border-top/right/bottom: 1px solid transparent).
 - **Hover:** Subtle warm background tint, gentle lift shadow.
-- **Selected:** `background: var(--bg-surface-warm); border-left: 3px solid [category-border-color]; border-top/bottom: 1px solid var(--border-subtle);`
+- **Selected:** `background: var(--bg-surface-warm); border-top/bottom: 1px solid var(--border-subtle);` (left border keeps heat-gradient color).
 - **Action buttons are NOT shown in the list.** All actions live in the reader pane.
-- **Confidence scores are NOT shown in the list.** Moved to reader pane metadata.
 
 **Avatar colors:** Generated from sender name hash. Palette of 6 warm hues: peach `#e8d5c4`, sky `#c4d5e8`, lavender `#d4c4e8`, sage `#c4e0d8`, sand `#e8dcc4`, rose `#e8c4c4`. Text color is a darker shade of the same hue.
 
-### 3.4 Reader Pane
+### 3.6 Reader Pane
 
 Right panel showing the selected email and AI draft.
 
 **Header section (sticky top):**
 - Avatar (40px) + Subject (18px/700) + Sender name, email, timestamp (12px muted).
-- Right side: Category badge + confidence score badge.
+- Right side: Category badge + tag pills + score badge (shows numeric score, e.g., "Score: 85" with heat-gradient color).
+- Below header: **Score detail strip** (collapsible, collapsed by default) — clicking the score badge toggles it. Shows: urgency level, recommended action, and scoring reasons as a small muted list. This gives full transparency into why the email was ranked where it is.
 - Below: Action button bar — Reply, Pin, Archive, Mark Done (`.btn` secondary). Delete isolated on right (`.btn` danger).
 
 **Body section (scrollable):**
@@ -284,7 +353,7 @@ Right panel showing the selected email and AI draft.
 
 **Empty state:** When no email is selected, centered placeholder with muted text: "Select an email to read." Warm, minimal — no heavy illustrations.
 
-### 3.5 Mobile Email Experience
+### 3.7 Mobile Email Experience
 
 - **<768px:** Single-panel mode.
   - Email list takes full width. Category pills wrap as needed.
@@ -355,6 +424,10 @@ Lives at the **bottom of the icon rail** — always visible regardless of active
 **AI Settings Card:**
 - Enable AI Drafting toggle (`.toggle` component).
 - Max Draft Length input.
+
+**Scoring & Priority Card:**
+- **Priority threshold** slider/input (replaces the current "Triage Threshold %" label): value 0–100, with description "Hide emails scoring below this value." Maps to the existing `minScore` setting.
+- **Group by priority** toggle (`.toggle`): on/off. When on, the email list shows Act Now / Review / Low Priority tier sections. When off, flat score-sorted list with heat-gradient borders only. Default: on. This is a new client-side preference stored in localStorage.
 
 ### 4.5 Categorization Tab
 
