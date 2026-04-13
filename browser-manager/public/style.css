@@ -1087,3 +1087,96 @@ header h1 {
 .category-badge[title] {
     cursor: help;
 }
+
+/* Settings Panel Styles */
+.settings-panel {
+  max-width: 1000px;
+  padding: 20px;
+  background: #f5f5f5;
+  border-radius: 5px;
+}
+
+.settings-panel section {
+  margin-bottom: 30px;
+  background: white;
+  padding: 15px;
+  border-radius: 3px;
+}
+
+.category-cards .cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 15px;
+}
+
+.category-card {
+  border: 1px solid #ddd;
+  padding: 15px;
+  border-radius: 3px;
+  background: #fafafa;
+}
+
+.category-card h3 {
+  margin-top: 0;
+}
+
+.category-card label {
+  display: block;
+  margin: 10px 0;
+}
+
+.category-card input[type="text"] {
+  width: 100%;
+  padding: 5px;
+  margin-top: 5px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+}
+
+.topic-labels-list,
+.custom-rules-list {
+  list-style: none;
+  padding: 0;
+}
+
+.topic-labels-list li,
+.custom-rules-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.label-item,
+.rule-item {
+  flex-grow: 1;
+}
+
+.delete-button {
+  color: #e74c3c;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 5px 10px;
+}
+
+.delete-button:hover {
+  text-decoration: underline;
+}
+
+.add-label-button,
+.add-rule-button {
+  padding: 8px 12px;
+  margin-bottom: 15px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.add-label-button:hover,
+.add-rule-button:hover {
+  background: #2980b9;
+}

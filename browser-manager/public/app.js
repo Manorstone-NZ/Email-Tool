@@ -61,6 +61,8 @@ class DashboardClient {
               minScore: Number(data?.meta?.minScore || this.triageMeta.minScore || 35)
             };
           this.renderTriage();
+        } else if (data.type === 'settings_updated') {
+          handleSettingsUpdated(data);
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e);
@@ -1396,11 +1398,189 @@ function renderCategoryBadge(item) {
   return span;
 }
 
+// Settings Panel Renderer
+async function renderSettingsPanel(container, api) {
+  try {
+    const settings = await api.getSettings();
+    
+    // Clear container
+    container.innerHTML = '';
+
+    // Global settings
+    const globalSection = document.createElement('section');
+    globalSection.className = 'global-settings';
+    const globalToggle = document.createElement('input');
+    globalToggle.type = 'checkbox';
+    globalToggle.id = 'topicLabelsGloballyEnabled';
+    globalToggle.checked = settings.topicLabelsGloballyEnabled;
+    globalToggle.addEventListener('change', () => updateSettings(api, container, settings));
+    globalSection.appendChild(globalToggle);
+    const label = document.createElement('label');
+    label.htmlFor = 'topicLabelsGloballyEnabled';
+    label.textContent = 'Enable Topic Labels Globally';
+    globalSection.appendChild(label);
+    container.appendChild(globalSection);
+
+    // Category cards
+    const cardsSection = document.createElement('section');
+    cardsSection.className = 'category-cards';
+    const cardsTitle = document.createElement('h4');
+    cardsTitle.textContent = 'Categories';
+    cardsSection.appendChild(cardsTitle);
+    const cardsContainer = document.createElement('div');
+    cardsContainer.className = 'cards-container';
+    cardsContainer.id = 'category-cards';
+    
+    for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
+      const card = document.createElement('div');
+      card.className = 'category-card';
+      const catSettings = settings.categories[cat];
+      
+      card.innerHTML = `
+        <h3>${cat}</h3>
+        <label>
+          <input type="checkbox" name="${cat}-enabled" ${catSettings.enabled ? 'checked' : ''} />
+          Enabled
+        </label>
+        <label>
+          Folder:
+          <input type="text" name="${cat}-targetFolderName" value="${catSettings.targetFolderName || ''}" />
+        </label>
+        <label>
+          Outlook Tag:
+          <input type="text" name="${cat}-outlookCategoryTag" value="${catSettings.outlookCategoryTag || ''}" />
+        </label>
+        <label>
+          <input type="checkbox" name="${cat}-topicLabels" ${catSettings.topicLabelsEnabled ? 'checked' : ''} />
+          Enable Topic Labels
+        </label>
+      `;
+      
+      const inputs = card.querySelectorAll('input');
+      inputs.forEach(input => {
+        input.addEventListener('change', () => updateSettings(api, container, settings));
+      });
+      
+      cardsContainer.appendChild(card);
+    }
+    
+    cardsSection.appendChild(cardsContainer);
+    container.appendChild(cardsSection);
+
+    // Topic labels
+    const labelsSection = document.createElement('section');
+    labelsSection.className = 'topic-labels-section';
+    const labelsTitle = document.createElement('h4');
+    labelsTitle.textContent = 'Topic Labels';
+    labelsSection.appendChild(labelsTitle);
+    const addLabelBtn = document.createElement('button');
+    addLabelBtn.className = 'add-label-button';
+    addLabelBtn.textContent = '+ Add Topic Label';
+    labelsSection.appendChild(addLabelBtn);
+    const labelsList = document.createElement('ul');
+    labelsList.className = 'topic-labels-list';
+    labelsList.id = 'topic-labels-list';
+    
+    for (const label of settings.topicLabels) {
+      const li = document.createElement('li');
+      li.className = 'label-item';
+      li.innerHTML = `
+        <span>${label.key} → ${label.mapsToCategory} (${label.patterns.join(', ')})</span>
+        <button class="delete-button" data-id="${label.id}">Delete</button>
+      `;
+      li.querySelector('.delete-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        settings.topicLabels = settings.topicLabels.filter(l => l.id !== label.id);
+        api.putSettings(settings);
+      });
+      labelsList.appendChild(li);
+    }
+    
+    labelsSection.appendChild(labelsList);
+    container.appendChild(labelsSection);
+
+    // Custom rules
+    const rulesSection = document.createElement('section');
+    rulesSection.className = 'custom-rules-section';
+    const rulesTitle = document.createElement('h4');
+    rulesTitle.textContent = 'Custom Rules';
+    rulesSection.appendChild(rulesTitle);
+    const addRuleBtn = document.createElement('button');
+    addRuleBtn.className = 'add-rule-button';
+    addRuleBtn.textContent = '+ Add Custom Rule';
+    rulesSection.appendChild(addRuleBtn);
+    const rulesList = document.createElement('ul');
+    rulesList.className = 'custom-rules-list';
+    rulesList.id = 'custom-rules-list';
+    
+    for (const rule of settings.customRules) {
+      const li = document.createElement('li');
+      li.className = 'rule-item';
+      li.innerHTML = `
+        <span>${rule.type}: ${rule.value} → ${rule.action}</span>
+        <button class="delete-button" data-id="${rule.id}">Delete</button>
+      `;
+      li.querySelector('.delete-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        settings.customRules = settings.customRules.filter(r => r.id !== rule.id);
+        api.putSettings(settings);
+      });
+      rulesList.appendChild(li);
+    }
+    
+    rulesSection.appendChild(rulesList);
+    container.appendChild(rulesSection);
+
+  } catch (error) {
+    console.error('[renderSettingsPanel] Error:', error);
+    container.innerHTML = `<p style="color: red;">Error loading settings: ${error.message}</p>`;
+  }
+}
+
+async function updateSettings(api, container, currentSettings) {
+  // Collect current settings from form
+  const settings = {
+    topicLabelsGloballyEnabled: container.querySelector('#topicLabelsGloballyEnabled').checked,
+    categories: {},
+    topicLabels: currentSettings.topicLabels || [],
+    customRules: currentSettings.customRules || [],
+  };
+
+  for (const cat of ['todo', 'fyi', 'to_follow_up', 'notification', 'marketing']) {
+    settings.categories[cat] = {
+      enabled: container.querySelector(`input[name="${cat}-enabled"]`).checked,
+      targetFolderName: container.querySelector(`input[name="${cat}-targetFolderName"]`).value,
+      outlookCategoryTag: container.querySelector(`input[name="${cat}-outlookCategoryTag"]`).value,
+      topicLabelsEnabled: container.querySelector(`input[name="${cat}-topicLabels"]`).checked,
+    };
+  }
+
+  await api.putSettings(settings);
+}
+
+function handleSettingsUpdated(message) {
+  if (message.key === 'categorisation') {
+    const panel = document.getElementById('settings-panel');
+    if (panel) {
+      renderSettingsPanel(panel, {
+        getSettings: () => Promise.resolve(message.settings),
+        putSettings: (settings) => fetch('/api/settings/categorisation', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings)
+        }).then(r => r.json())
+      });
+    }
+  }
+}
+
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;
   window.getCategoryDisplayName = getCategoryDisplayName;
+  window.renderSettingsPanel = renderSettingsPanel;
+  window.handleSettingsUpdated = handleSettingsUpdated;
 }

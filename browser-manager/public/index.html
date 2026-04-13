@@ -140,6 +140,51 @@
                     <small>Comma-separated prefixes or addresses</small>
                 </div>
                 <div class="setting-group">
+                    <label for="setting-aiPrimary">AI Primary Provider</label>
+                    <select id="setting-aiPrimary" name="aiProviderPrimary">
+                        <option value="claude-opus">Claude Opus</option>
+                        <option value="openai-gpt41">OpenAI (GPT-4.1)</option>
+                        <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-aiFallback">AI Fallback Provider</label>
+                    <select id="setting-aiFallback" name="aiProviderFallback">
+                        <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+                        <option value="openai-gpt54">OpenAI (GPT-5.4)</option>
+                        <option value="claude-opus">Claude Opus</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-openaiApiKey">OpenAI API Key</label>
+                    <input id="setting-openaiApiKey" type="password" name="openaiApiKey" placeholder="sk-..." autocomplete="off" spellcheck="false">
+                    <small>Used for OpenAI primary/fallback calls. Saved to local config/settings.json.</small>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-aiOpenAiModel">OpenAI Model</label>
+                    <select id="setting-aiOpenAiModel" name="aiOpenAiModel">
+                        <option value="gpt-5.4">GPT-5.4 (Flagship)</option>
+                        <option value="gpt-5.4-mini">GPT-5.4 Mini (Cost-effective)</option>
+                        <option value="gpt-5.4-nano">GPT-5.4 Nano (Budget)</option>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    </select>
+                    <small>Examples: gpt-4.1, gpt-4.1-mini, gpt-4o, gpt-4o-mini.</small>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-anthropicApiKey">Anthropic API Key</label>
+                    <input id="setting-anthropicApiKey" type="password" name="anthropicApiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+                    <small>Used for Claude primary/fallback calls. Saved to local config/settings.json.</small>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-aiDraftEnabled">Enable AI Drafting</label>
+                    <input id="setting-aiDraftEnabled" type="checkbox" name="aiDraftEnabled" checked>
+                </div>
+                <div class="setting-group">
+                    <label for="setting-maxDraftLength">Max Draft Length (chars)</label>
+                    <input id="setting-maxDraftLength" type="number" name="maxDraftLength" min="200" max="12000">
+                </div>
+                <div class="setting-group">
                     <label for="setting-extra">Additional Settings (JSON)</label>
                     <textarea id="setting-extra" name="extraSettingsJson" rows="6" placeholder="{&#10;  &quot;graphScopes&quot;: [&quot;Mail.Read&quot;, &quot;User.Read&quot;]&#10;}"></textarea>
                     <small>Any custom keys you add are loaded here and saved back to settings.</small>
@@ -147,12 +192,65 @@
                 <button type="submit" class="btn btn-primary">Save</button>
                 <div id="settingsSaveStatus" class="settings-save-status"></div>
             </form>
+
+            <hr style="margin: 30px 0;">
+            <h3>Categorization Settings</h3>
+            <div id="settings-panel" class="settings-panel">
+                <!-- Global Settings -->
+                <section class="global-settings">
+                    <h4>Global Settings</h4>
+                    <label>
+                        <input type="checkbox" id="topicLabelsGloballyEnabled" />
+                        Enable Topic Labels Globally
+                    </label>
+                </section>
+
+                <!-- Category Cards -->
+                <section class="category-cards">
+                    <h4>Categories</h4>
+                    <div class="cards-container" id="category-cards"></div>
+                </section>
+
+                <!-- Topic Labels -->
+                <section class="topic-labels-section">
+                    <h4>Topic Labels</h4>
+                    <button class="add-label-button">+ Add Topic Label</button>
+                    <ul class="topic-labels-list" id="topic-labels-list"></ul>
+                </section>
+
+                <!-- Custom Rules -->
+                <section class="custom-rules-section">
+                    <h4>Custom Rules</h4>
+                    <button class="add-rule-button">+ Add Custom Rule</button>
+                    <ul class="custom-rules-list" id="custom-rules-list"></ul>
+                </section>
+            </div>
         </section>
     </main>
+
+    <div id="draftEditorModal" class="draft-editor-modal" hidden>
+        <div class="draft-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="draftEditorTitle">
+            <h3 id="draftEditorTitle">Edit draft before approval</h3>
+            <p id="draftEditorProviderNotice" class="draft-editor-provider-notice"></p>
+
+            <label class="draft-editor-label" for="draftEditorSubject">Subject</label>
+            <input id="draftEditorSubject" class="draft-editor-input" type="text" autocomplete="off" spellcheck="false">
+
+            <label class="draft-editor-label" for="draftEditorBody">Body</label>
+            <textarea id="draftEditorBody" class="draft-editor-textarea" rows="14" spellcheck="true"></textarea>
+
+            <div class="draft-editor-actions">
+                <button type="button" id="draftEditorCancel" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="draftEditorSave" class="btn btn-primary">Use Draft</button>
+            </div>
+        </div>
+    </div>
 
     <script src="portal-constants.js"></script>
     <script src="portal-state.js"></script>
     <script src="email-helpers.js"></script>
+    <script src="ai-provider-helpers.js"></script>
+    <script src="draft-editor-helpers.js"></script>
     <script src="log-helpers.js"></script>
     <script src="app.js"></script>
 </body>
