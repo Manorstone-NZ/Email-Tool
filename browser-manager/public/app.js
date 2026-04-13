@@ -189,6 +189,89 @@ class DashboardClient {
     }
   }
 
+  async openDraftEditorModal({ subject, body, providerNotice }) {
+    const modal = document.getElementById('draftEditorModal');
+    const subjectInput = document.getElementById('draftEditorSubject');
+    const bodyInput = document.getElementById('draftEditorBody');
+    const providerNoticeEl = document.getElementById('draftEditorProviderNotice');
+    const cancelBtn = document.getElementById('draftEditorCancel');
+    const saveBtn = document.getElementById('draftEditorSave');
+
+    if (!modal || !subjectInput || !bodyInput || !providerNoticeEl || !cancelBtn || !saveBtn) {
+      const fallbackSubject = window.prompt(`Edit draft subject before approval:\n${providerNotice}`, String(subject || ''));
+      if (fallbackSubject === null) {
+        return null;
+      }
+      const fallbackBody = window.prompt(`Edit draft body before approval:\n${providerNotice}`, String(body || ''));
+      if (fallbackBody === null) {
+        return null;
+      }
+      return {
+        subject: fallbackSubject,
+        body: fallbackBody,
+      };
+    }
+
+    providerNoticeEl.textContent = providerNotice;
+    subjectInput.value = String(subject || '');
+    bodyInput.value = String(body || '');
+    bodyInput.rows = calculateDraftEditorRows(bodyInput.value);
+    modal.hidden = false;
+
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        modal.hidden = true;
+        cancelBtn.removeEventListener('click', onCancel);
+        saveBtn.removeEventListener('click', onSave);
+        modal.removeEventListener('click', onBackdropClick);
+        document.removeEventListener('keydown', onKeyDown, true);
+      };
+
+      const onCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      const onSave = () => {
+        cleanup();
+        resolve({
+          subject: subjectInput.value,
+          body: bodyInput.value,
+        });
+      };
+
+      const onBackdropClick = (event) => {
+        if (event.target === modal) {
+          onCancel();
+        }
+      };
+
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onCancel();
+          return;
+        }
+
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault();
+          onSave();
+        }
+      };
+
+      cancelBtn.addEventListener('click', onCancel);
+      saveBtn.addEventListener('click', onSave);
+      modal.addEventListener('click', onBackdropClick);
+      document.addEventListener('keydown', onKeyDown, true);
+
+      setTimeout(() => {
+        bodyInput.focus();
+        const cursor = bodyInput.value.length;
+        bodyInput.setSelectionRange(cursor, cursor);
+      }, 0);
+    });
+  }
+
   // ── Logs rendering and filtering ──────────────────────────────────────────
   renderLogs() {
     const tableBody = document.getElementById('logsTableBody');
@@ -346,12 +429,33 @@ class DashboardClient {
   fillSettingsForm(s) {
     const f = (id) => document.getElementById(id);
     const settings = s && typeof s === 'object' ? s : {};
-    const knownKeys = new Set(['emailProvider', 'graphClientId', 'graphTenantId', 'lookbackDays', 'minScore', 'vipSenders']);
+    const knownKeys = new Set([
+      'emailProvider',
+      'graphClientId',
+      'graphTenantId',
+      'lookbackDays',
+      'minScore',
+      'vipSenders',
+      'aiProviderPrimary',
+      'aiProviderFallback',
+      'anthropicApiKey',
+      'openaiApiKey',
+      'aiOpenAiModel',
+      'aiDraftEnabled',
+      'maxDraftLength',
+    ]);
     if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
     if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
     if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
     if (f('setting-lookbackDays')) f('setting-lookbackDays').value = s.lookbackDays ?? 3;
     if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
+    if (f('setting-aiPrimary')) f('setting-aiPrimary').value = s.aiProviderPrimary || 'claude-opus';
+    if (f('setting-aiFallback')) f('setting-aiFallback').value = s.aiProviderFallback || 'gemma-lmstudio';
+    if (f('setting-openaiApiKey')) f('setting-openaiApiKey').value = s.openaiApiKey || '';
+    if (f('setting-aiOpenAiModel')) f('setting-aiOpenAiModel').value = s.aiOpenAiModel || 'gpt-5.4';
+    if (f('setting-anthropicApiKey')) f('setting-anthropicApiKey').value = s.anthropicApiKey || '';
+    if (f('setting-aiDraftEnabled')) f('setting-aiDraftEnabled').checked = s.aiDraftEnabled !== false;
+    if (f('setting-maxDraftLength')) f('setting-maxDraftLength').value = s.maxDraftLength ?? 4000;
     if (f('setting-vipSenders')) {
       f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
     }
@@ -391,6 +495,13 @@ class DashboardClient {
         lookbackDays: Number(formData.get('lookbackDays')) || 3,
         minScore: Number(formData.get('minScore')) || 20,
         vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
+        aiProviderPrimary: formData.get('aiProviderPrimary') || 'claude-opus',
+        aiProviderFallback: formData.get('aiProviderFallback') || 'gemma-lmstudio',
+        openaiApiKey: formData.get('openaiApiKey') || '',
+        aiOpenAiModel: formData.get('aiOpenAiModel') || 'gpt-4.1',
+        anthropicApiKey: formData.get('anthropicApiKey') || '',
+        aiDraftEnabled: formData.get('aiDraftEnabled') === 'on',
+        maxDraftLength: Number(formData.get('maxDraftLength')) || 4000,
         extraSettings
       };
 
@@ -683,7 +794,25 @@ class DashboardClient {
       doneEl.dataset.action = 'done';
       doneEl.textContent = 'Done';
 
-      actionsEl.append(openEl, pinEl, doneEl);
+      const draftEl = document.createElement('button');
+      draftEl.type = 'button';
+      draftEl.className = 'btn-card-action';
+      draftEl.dataset.action = 'draft';
+      draftEl.textContent = 'Draft Reply';
+
+      const deleteEl = document.createElement('button');
+      deleteEl.type = 'button';
+      deleteEl.className = 'btn-card-action btn-card-action-danger';
+      deleteEl.dataset.action = 'delete';
+      deleteEl.textContent = '🗑 Delete';
+
+      const archiveEl = document.createElement('button');
+      archiveEl.type = 'button';
+      archiveEl.className = 'btn-card-action';
+      archiveEl.dataset.action = 'archive';
+      archiveEl.textContent = '📦 Archive';
+
+      actionsEl.append(openEl, pinEl, doneEl, draftEl, deleteEl, archiveEl);
 
       const expandedEl = document.createElement('div');
       expandedEl.className = 'card-expanded';
@@ -698,6 +827,20 @@ class DashboardClient {
       const reasonLabelEl = document.createElement('strong');
       reasonLabelEl.textContent = 'Reason:';
       reasonEl.append(reasonLabelEl, document.createTextNode(` ${reasonText}`));
+
+      const aiMetaEl = document.createElement('div');
+      aiMetaEl.className = 'card-signals';
+      const aiMetaLabelEl = document.createElement('strong');
+      aiMetaLabelEl.textContent = 'AI:';
+      const aiMetaText = formatAiProviderLabel(item);
+      aiMetaEl.append(aiMetaLabelEl, document.createTextNode(` ${aiMetaText}`));
+
+      const categorySourceEl = document.createElement('div');
+      categorySourceEl.className = 'card-signals';
+      const categorySourceLabelEl = document.createElement('strong');
+      categorySourceLabelEl.textContent = 'Category Source:';
+      const categorySourceText = formatCategorySourceLabel(item);
+      categorySourceEl.append(categorySourceLabelEl, document.createTextNode(` ${categorySourceText}`));
 
       const signalsEl = document.createElement('div');
       signalsEl.className = 'card-signals';
@@ -716,7 +859,7 @@ class DashboardClient {
       rawContentEl.textContent = JSON.stringify(item, null, 2);
 
       rawEl.append(rawSummaryEl, rawContentEl);
-      expandedEl.append(bodyPreviewEl, reasonEl, signalsEl, rawEl);
+  expandedEl.append(bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
 
       collapsedEl.addEventListener('click', () => {
         const isExpanded = cardEl.dataset.expanded === 'true';
@@ -773,6 +916,130 @@ class DashboardClient {
         this.renderTriage();
       });
 
+      draftEl.addEventListener('click', async (event) => {
+        event.stopPropagation();
+
+        try {
+          const generatedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
+            method: 'POST',
+          });
+          const generatedData = await generatedRes.json();
+          if (!generatedData.success) {
+            throw new Error(generatedData.error || `HTTP ${generatedRes.status}`);
+          }
+
+          const generatedDraft = generatedData.draft || {};
+          const providerNotice = formatDraftProviderNotice(generatedDraft);
+          const editedDraft = await this.openDraftEditorModal({
+            subject: generatedDraft.subject,
+            body: generatedDraft.body,
+            providerNotice,
+          });
+          if (!editedDraft) {
+            return;
+          }
+
+          const savedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subject: editedDraft.subject,
+              body: editedDraft.body,
+            }),
+          });
+          const savedData = await savedRes.json();
+          if (!savedData.success) {
+            throw new Error(savedData.error || `HTTP ${savedRes.status}`);
+          }
+
+          if (!window.confirm(`${providerNotice}\nApprove this draft for sending?`)) {
+            return;
+          }
+
+          const approvedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approvedBy: 'user' }),
+          });
+          const approvedData = await approvedRes.json();
+          if (!approvedData.success) {
+            throw new Error(approvedData.error || `HTTP ${approvedRes.status}`);
+          }
+
+          if (!window.confirm(`${providerNotice}\nSend approved draft now?`)) {
+            return;
+          }
+
+          const sendRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/send`, {
+            method: 'POST',
+          });
+          const sendData = await sendRes.json();
+          if (!sendData.success) {
+            throw new Error(sendData.error || `HTTP ${sendRes.status}`);
+          }
+
+          alert('Draft sent successfully.');
+        } catch (err) {
+          alert(`Draft flow failed: ${err.message}`);
+        }
+      });
+
+      deleteEl.addEventListener('click', async (event) => {
+        event.stopPropagation();
+
+        if (!confirm('Are you sure you want to delete this email?')) {
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/delete`, {
+            method: 'POST',
+          });
+          const data = await res.json();
+          if (!data.success) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+          }
+
+          // Remove the email from the list
+          cardEl.remove();
+          if (document.getElementById('triageList').children.length === 0) {
+            const emptyStateEl = document.getElementById('emailEmptyState');
+            if (emptyStateEl) {
+              emptyStateEl.textContent = 'No emails found.';
+              emptyStateEl.hidden = false;
+            }
+          }
+        } catch (err) {
+          alert(`Failed to delete email: ${err.message}`);
+        }
+      });
+
+      archiveEl.addEventListener('click', async (event) => {
+        event.stopPropagation();
+
+        try {
+          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/archive`, {
+            method: 'POST',
+          });
+          const data = await res.json();
+          if (!data.success) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+          }
+
+          // Archive the email by removing it from the list
+          cardEl.remove();
+          if (document.getElementById('triageList').children.length === 0) {
+            const emptyStateEl = document.getElementById('emailEmptyState');
+            if (emptyStateEl) {
+              emptyStateEl.textContent = 'No emails found.';
+              emptyStateEl.hidden = false;
+            }
+          }
+        } catch (err) {
+          alert(`Failed to archive email: ${err.message}`);
+        }
+      });
+
       cardEl.append(collapsedEl, actionsEl, expandedEl);
       listEl.appendChild(cardEl);
     });
@@ -787,6 +1054,53 @@ class DashboardClient {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
   }
+}
+
+function formatAiProviderLabel(item) {
+  if (typeof AiProviderHelpers !== 'undefined' && AiProviderHelpers.formatAiProviderLabel) {
+    return AiProviderHelpers.formatAiProviderLabel(item);
+  }
+
+  const aiPriority = String((item && item.aiPriority) || '').trim();
+  const aiProviderUsed = String((item && item.aiProviderUsed) || '').trim();
+  if (!aiPriority) {
+    return 'Unavailable';
+  }
+  return aiProviderUsed ? `${aiPriority} (${aiProviderUsed})` : aiPriority;
+}
+
+function formatDraftProviderNotice(draft) {
+  if (typeof AiProviderHelpers !== 'undefined' && AiProviderHelpers.formatDraftProviderNotice) {
+    return AiProviderHelpers.formatDraftProviderNotice(draft);
+  }
+
+  const providerUsed = String((draft && draft.providerUsed) || '').trim() || 'unknown provider';
+  return `Draft generated by ${providerUsed}.`;
+}
+
+function formatCategorySourceLabel(item) {
+  if (typeof AiProviderHelpers !== 'undefined' && AiProviderHelpers.formatCategorySourceLabel) {
+    return AiProviderHelpers.formatCategorySourceLabel(item);
+  }
+
+  const source = String((item && item.categorySource) || '').trim();
+  if (source === 'ai') {
+    return 'AI';
+  }
+  if (source === 'heuristic') {
+    return 'Heuristic fallback';
+  }
+  return 'Unknown';
+}
+
+function calculateDraftEditorRows(text) {
+  if (typeof DraftEditorHelpers !== 'undefined' && DraftEditorHelpers.calculateEditorRows) {
+    return DraftEditorHelpers.calculateEditorRows(text);
+  }
+
+  const value = String(text || '');
+  const lineCount = value ? value.split(/\r\n|\r|\n/).length : 1;
+  return Math.min(24, Math.max(10, lineCount + 2));
 }
 
 // ── URL safety helper ──────────────────────────────────────────────────────
@@ -997,3 +1311,96 @@ document.addEventListener('DOMContentLoaded', () => {
   applyRoute(startRoute);
   syncRouteHash(startRoute);
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Category Badge Components (Task 8: Frontend Category Badge)
+// ──────────────────────────────────────────────────────────────────────────
+
+// Category colour scheme
+const CATEGORY_COLOURS = {
+  todo: '#e74c3c',
+  fyi: '#3498db',
+  to_follow_up: '#f39c12',
+  notification: '#27ae60',
+  marketing: '#95a5a6',
+  null: '#bdc3c7',
+};
+
+const CATEGORY_DISPLAY_NAMES = {
+  todo: 'Todo',
+  fyi: 'FYI',
+  to_follow_up: 'To Follow Up',
+  notification: 'Notification',
+  marketing: 'Marketing',
+  null: 'Uncategorised',
+};
+
+function getCategoryColour(category) {
+  return CATEGORY_COLOURS[category] || CATEGORY_COLOURS.null;
+}
+
+function getCategoryDisplayName(category) {
+  return CATEGORY_DISPLAY_NAMES[category] || 'Unknown';
+}
+
+function renderCategoryBadge(item) {
+  const span = document.createElement('span');
+  
+  span.className = 'category-badge';
+  span.classList.add(`category-${item.category || 'null'}`);
+  
+  if (item.isLoading) {
+    span.classList.add('loading');
+  }
+
+  // Build title attribute
+  const titleParts = [item.category || 'uncategorised'];
+  if (item.categorySource) titleParts.push(item.categorySource);
+  if (item.categorizationConfidence !== null && item.categorizationConfidence !== undefined) {
+    titleParts.push(`${Math.round(item.categorizationConfidence * 100)}%`);
+  }
+  span.setAttribute('title', titleParts.join(' · '));
+
+  // Build content
+  let content = getCategoryDisplayName(item.category);
+  if (item.categorizationConfidence !== null && item.categorizationConfidence !== undefined) {
+    content += ` ${Math.round(item.categorizationConfidence * 100)}%`;
+  }
+  if (item.isLoading) {
+    content += ' …';
+  }
+  span.textContent = content;
+
+  // Add skip-automation indicator
+  if (item.skipAutomation) {
+    const lockIcon = document.createElement('span');
+    lockIcon.className = 'skip-automation';
+    lockIcon.textContent = '🔒';
+    lockIcon.setAttribute('title', 'Automation skipped for this email');
+    span.appendChild(lockIcon);
+  }
+
+  // Apply colour via style
+  span.style.backgroundColor = getCategoryColour(item.category);
+  span.style.color = '#fff';
+  span.style.padding = '2px 6px';
+  span.style.borderRadius = '3px';
+  span.style.fontSize = '12px';
+  span.style.fontWeight = 'bold';
+  span.style.display = 'inline-block';
+  span.style.marginRight = '4px';
+
+  span.style.opacity = item.isLoading ? '0.6' : '1';
+  span.style.cursor = item.isLoading ? 'wait' : 'default';
+
+  return span;
+}
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName };
+} else {
+  window.renderCategoryBadge = renderCategoryBadge;
+  window.getCategoryColour = getCategoryColour;
+  window.getCategoryDisplayName = getCategoryDisplayName;
+}
