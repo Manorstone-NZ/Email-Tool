@@ -14,6 +14,7 @@ class DashboardClient {
       tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
     };
     this.selectedEmailId = null;
+    this.triageError = null;
     // Logs state (session-only, no persistence)
     this.logs = [];
     this.logsFilterSearch = '';
@@ -586,6 +587,7 @@ class DashboardClient {
     if (statusEl) {
       statusEl.textContent = 'Scanning inbox...';
     }
+    this.triageError = null;
 
     try {
       const response = await fetch('/api/emails/triage', { method: 'POST' });
@@ -598,10 +600,14 @@ class DashboardClient {
         extractedCount: Number(data.extractedCount || 0),
         minScore: Number(data.minScore ?? this.triageMeta.minScore ?? 35)
       };
+      this.triageError = null;
       this.renderTriage();
     } catch (error) {
+      this.triageError = 'Unable to load messages';
+      this.triageItems = [];
+      this.renderTriage();
       if (statusEl) {
-        statusEl.textContent = `Triage failed: ${error.message}`;
+        statusEl.textContent = this.triageError;
       }
     } finally {
       if (btnEl) {
@@ -624,10 +630,7 @@ class DashboardClient {
       ? PortalState.mergeEmailUiState(mapped, localState)
       : mapped;
 
-    // Apply text search, category, state, tag filters
-    const filtered = typeof EmailHelpers !== 'undefined' && EmailHelpers.filterEmailItems
-      ? EmailHelpers.filterEmailItems(merged, this.emailFilters)
-      : merged;
+    const filtered = applyEmailFilters(merged, this.emailFilters);
 
     if (typeof EmailHelpers !== 'undefined' && EmailHelpers.warnIfLargeEmailList) {
       EmailHelpers.warnIfLargeEmailList(filtered);
@@ -740,12 +743,10 @@ class DashboardClient {
 
     if (!safeItems.length) {
       if (emptyStateEl) {
-        // Determine which empty state to show
-        if (this.emailFilters.search || this.emailFilters.category || this.emailFilters.state || this.emailFilters.tag) {
-          emptyStateEl.textContent = 'No results match current filters.';
-        } else {
-          emptyStateEl.textContent = 'No emails found.';
-        }
+        emptyStateEl.textContent = resolveEmptyStateMessage({
+          triageError: this.triageError,
+          filters: this.emailFilters,
+        });
         emptyStateEl.hidden = false;
       }
       return;
@@ -1315,6 +1316,69 @@ function toggleFilterValue(currentValue, nextValue) {
   return currentValue === next ? null : next;
 }
 
+function applySearch(items, searchTerm) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const query = String(searchTerm || '').trim().toLowerCase();
+  if (!query) {
+    return safeItems;
+  }
+
+  return safeItems.filter((item) => {
+    const haystack = [
+      item && item.subject,
+      item && item.sender,
+      item && item.preview,
+      item && item.body,
+    ].join(' ').toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function applyCategoryFilter(items, category) {
+  if (!category) {
+    return items;
+  }
+  return items.filter((item) => String((item && item.primaryCategory) || '') === String(category));
+}
+
+function applyStateFilter(items, state) {
+  if (!state) {
+    return items;
+  }
+  return items.filter((item) => String((item && item.stateLabel) || '') === String(state));
+}
+
+function applyTagFilter(items, tag) {
+  if (!tag) {
+    return items;
+  }
+
+  return items.filter((item) => {
+    const tags = Array.isArray(item && item.tags) ? item.tags : [];
+    return tags.some((candidate) => String(candidate) === String(tag));
+  });
+}
+
+function applyEmailFilters(items, filters) {
+  const safeFilters = filters || {};
+  const searched = applySearch(items, safeFilters.search);
+  const categoryFiltered = applyCategoryFilter(searched, safeFilters.category);
+  const stateFiltered = applyStateFilter(categoryFiltered, safeFilters.state);
+  return applyTagFilter(stateFiltered, safeFilters.tag);
+}
+
+function resolveEmptyStateMessage({ triageError, filters }) {
+  if (triageError) {
+    return String(triageError);
+  }
+
+  const safeFilters = filters || {};
+  if (safeFilters.search || safeFilters.category || safeFilters.state || safeFilters.tag) {
+    return 'No messages match current filters';
+  }
+  return 'No emails found.';
+}
+
 function resolveSelectedEmailId(currentSelectedId, visibleItems) {
   const safeItems = Array.isArray(visibleItems) ? visibleItems : [];
   const visibleIds = safeItems
@@ -1832,7 +1896,7 @@ function handleSettingsUpdated(message) {
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue, resolveSelectedEmailId, applyEmailFilters, resolveEmptyStateMessage };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;

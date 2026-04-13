@@ -31,4 +31,55 @@ describe('Email workspace contract', () => {
     const selected = resolveSelectedEmailId('email-1', []);
     expect(selected).toBe(null);
   });
+
+  test('applies search before category/state filters on same dataset', () => {
+    const { applyEmailFilters } = require('../../public/app.js');
+    const items = [
+      {
+        id: '1',
+        subject: 'Invoice requires review',
+        primaryCategory: 'Needs Reply',
+        stateLabel: 'Pinned',
+      },
+      {
+        id: '2',
+        subject: 'Team offsite',
+        primaryCategory: 'Needs Reply',
+        stateLabel: 'Pinned',
+      },
+      {
+        id: '3',
+        subject: 'Invoice paid confirmation',
+        primaryCategory: 'FYI',
+        stateLabel: 'Pinned',
+      },
+    ];
+
+    const result = applyEmailFilters(items, {
+      search: 'invoice',
+      category: 'Needs Reply',
+      state: 'Pinned',
+      tag: null,
+    });
+
+    expect(result.map((item) => item.id)).toEqual(['1']);
+    expect(result.every((item) => item.subject.toLowerCase().includes('invoice'))).toBe(true);
+  });
+
+  test('renders distinct fetch-error state from no-results state', () => {
+    const { resolveEmptyStateMessage } = require('../../public/app.js');
+
+    const errorText = resolveEmptyStateMessage({
+      triageError: 'Unable to load messages',
+      filters: { search: 'invoice', category: null, state: null, tag: null },
+    });
+    const noResultsText = resolveEmptyStateMessage({
+      triageError: null,
+      filters: { search: 'invoice', category: null, state: null, tag: null },
+    });
+
+    expect(errorText).toContain('Unable to load messages');
+    expect(errorText).not.toContain('No messages match current filters');
+    expect(noResultsText).toBe('No messages match current filters');
+  });
 });

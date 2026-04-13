@@ -156,5 +156,14 @@ describe('Categorisation UI Components', () => {
       const next = resolveSelectedEmailId('email-2', [{ id: 'email-1' }, { id: 'email-2' }]);
       expect(next).toBe('email-2');
     });
+
+    test('uses no-results copy when filters are active and there is no fetch error', () => {
+      const { resolveEmptyStateMessage } = require('../../public/app.js');
+      const text = resolveEmptyStateMessage({
+        triageError: null,
+        filters: { search: '', category: 'Needs Reply', state: null, tag: null },
+      });
+      expect(text).toBe('No messages match current filters');
+    });
   });
 });
