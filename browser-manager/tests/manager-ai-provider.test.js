@@ -169,4 +169,114 @@ describe('manager AI provider wiring', () => {
     expect(manager.priorityService.options.primaryProvider.model).toBe('claude-next');
     expect(manager.draftService.options.fallbackProvider.model).toBe('gpt-5.4');
   });
+
+  test('passes configured minScore into triage runs', async () => {
+    jest.doMock('../event-logger', () => jest.fn().mockImplementation(() => ({
+      on: jest.fn(),
+      logAutomationEvent: jest.fn(),
+      logUserEvent: jest.fn(),
+      getEvents: jest.fn(() => []),
+    })));
+    jest.doMock('../chrome-controller', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+      getCurrentURL: jest.fn(() => ''),
+    })));
+    jest.doMock('../chrome-listener', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+    jest.doMock('../dashboard', () => jest.fn().mockImplementation(() => ({
+      setEventLogger: jest.fn(),
+      setManager: jest.fn(),
+      setCategorizationSettings: jest.fn(),
+      broadcast: jest.fn(),
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+
+    const triageRun = jest.fn().mockResolvedValue([]);
+    jest.doMock('../src/email-triage', () => jest.fn().mockImplementation(function triageCtor() {
+      this.run = triageRun;
+      this.on = jest.fn();
+      this.getLastRunMeta = jest.fn(() => ({ minScore: 5 }));
+      this.getLastResult = jest.fn(() => []);
+    }));
+    jest.doMock('../src/email-extractor-factory', () => ({
+      createExtractor: jest.fn(() => ({ providerName: 'graph', getInboxEmails: jest.fn() })),
+    }));
+    jest.doMock('../src/email-scorer', () => jest.fn().mockImplementation(() => ({ vipSenders: [] })));
+    jest.doMock('../src/vip-config', () => ({ loadVipSenders: jest.fn(() => ['ceo@']) }));
+    jest.doMock('../src/send-service', () => jest.fn().mockImplementation(() => ({ sendApprovedDraft: jest.fn() })));
+    jest.doMock('../src/mail-action-service', () => jest.fn().mockImplementation(() => ({
+      applyActions: jest.fn(),
+      listMailFolders: jest.fn(),
+    })));
+    jest.doMock('../src/settings-store', () => ({
+      loadSettings: jest.fn(() => ({ minScore: 5, vipSenders: ['ceo@'] })),
+    }));
+
+    const manager = require('../manager');
+
+    await manager.triageEmails();
+
+    expect(triageRun).toHaveBeenCalledWith(undefined, expect.objectContaining({ minScore: 5 }));
+  });
+
+  test('setEmailPinned uses cached graph messageId when available', async () => {
+    jest.resetModules();
+
+    jest.doMock('../event-logger', () => jest.fn().mockImplementation(() => ({
+      on: jest.fn(),
+      logAutomationEvent: jest.fn(),
+      logUserEvent: jest.fn(),
+      getEvents: jest.fn(() => []),
+    })));
+    jest.doMock('../chrome-controller', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+      getCurrentURL: jest.fn(() => ''),
+    })));
+    jest.doMock('../chrome-listener', () => jest.fn().mockImplementation(() => ({
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+    jest.doMock('../dashboard', () => jest.fn().mockImplementation(() => ({
+      setEventLogger: jest.fn(),
+      setManager: jest.fn(),
+      broadcast: jest.fn(),
+      start: jest.fn(),
+      stop: jest.fn(),
+    })));
+
+    jest.doMock('../src/email-triage', () => jest.fn().mockImplementation(function triageCtor() {
+      this.run = jest.fn().mockResolvedValue([]);
+      this.on = jest.fn();
+      this.getLastRunMeta = jest.fn(() => ({}));
+      this.getLastResult = jest.fn(() => []);
+    }));
+    jest.doMock('../src/email-extractor-factory', () => ({
+      createExtractor: jest.fn(() => ({ providerName: 'graph', getInboxEmails: jest.fn() })),
+    }));
+    jest.doMock('../src/email-scorer', () => jest.fn().mockImplementation(() => ({ vipSenders: [] })));
+    jest.doMock('../src/vip-config', () => ({ loadVipSenders: jest.fn(() => []) }));
+    jest.doMock('../src/send-service', () => jest.fn().mockImplementation(() => ({ sendApprovedDraft: jest.fn() })));
+    jest.doMock('../src/settings-store', () => ({
+      loadSettings: jest.fn(() => ({ minScore: 5, vipSenders: [] })),
+    }));
+
+    const setPinned = jest.fn().mockResolvedValue({ success: true, action: 'pin', statusCode: 200, pinned: true });
+    jest.doMock('../src/mail-action-service', () => jest.fn().mockImplementation(() => ({
+      applyActions: jest.fn(),
+      listMailFolders: jest.fn(),
+      setPinned,
+    })));
+
+    const manager = require('../manager');
+    manager.lastTriageById.set('local-123', { messageId: 'graph-abc' });
+
+    await manager.setEmailPinned('local-123', true);
+
+    expect(setPinned).toHaveBeenCalledWith('graph-abc', true);
+  });
 });

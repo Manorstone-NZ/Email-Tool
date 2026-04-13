@@ -194,7 +194,7 @@ describe('EmailTriage Pipeline Integration Tests', () => {
     });
 
     test('filtering keeps marketing when includeMarketing=true', async () => {
-      const result = await emailTriage.run(undefined, { includeMarketing: true });
+      const result = await emailTriage.run(undefined, { includeMarketing: true, minScore: 0 });
 
       // Marketing item should be in results
       const hasMarketing = result.some(item => item.category === 'marketing');

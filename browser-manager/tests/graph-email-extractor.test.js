@@ -27,7 +27,10 @@ describe('GraphEmailExtractor', () => {
     const normalized = extractor.normalizeMessage(message);
 
     expect(normalized).toEqual({
+      messageId: 'msg-1',
       sender: 'ceo@company.com',
+      senderEmail: 'ceo@company.com',
+      senderDomain: 'company.com',
       subject: 'Approval Needed',
       body: 'Can you approve this today?',
       flagged: true,

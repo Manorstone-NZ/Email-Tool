@@ -15,6 +15,7 @@ function buildSettingsUpdates(body) {
     emailProvider,
     graphClientId,
     graphTenantId,
+    archiveFolderId,
     lookbackDays,
     minScore,
     vipSenders,
@@ -36,6 +37,7 @@ function buildSettingsUpdates(body) {
   if (emailProvider !== undefined) updates.emailProvider = String(emailProvider);
   if (graphClientId !== undefined) updates.graphClientId = String(graphClientId).trim();
   if (graphTenantId !== undefined) updates.graphTenantId = String(graphTenantId).trim() || 'organizations';
+  if (archiveFolderId !== undefined) updates.archiveFolderId = String(archiveFolderId).trim();
   if (lookbackDays !== undefined) updates.lookbackDays = Number(lookbackDays);
   if (minScore !== undefined) updates.minScore = Number(minScore);
   if (aiProviderPrimary !== undefined) updates.aiProviderPrimary = String(aiProviderPrimary).trim();
@@ -69,6 +71,18 @@ function buildSettingsUpdates(body) {
 function formatTriageItemForApi(item) {
   const email = item && item.email ? item.email : {};
   const emailId = buildEmailId(email);
+  const reasons = Array.isArray(item && item.reasons)
+    ? item.reasons.filter((reason) => typeof reason === 'string' && reason.trim() !== '')
+    : [];
+  const matchedSignals = [];
+
+  if (item && item.matchedTopicLabel) {
+    matchedSignals.push(`Topic label: ${item.matchedTopicLabel}`);
+  }
+  if (item && item.matchedRuleId) {
+    matchedSignals.push(`Rule: ${item.matchedRuleId}`);
+  }
+  matchedSignals.push(...reasons);
 
   return {
     id: emailId,  // Add explicit id field for frontend use
@@ -80,18 +94,21 @@ function formatTriageItemForApi(item) {
     preview: email.body || '',
     
     // Categorisation fields
-    category: (item && item.primaryCategory) || (email.category) || null,
+    category: (item && item.category) || (item && item.primaryCategory) || (email.category) || null,
     categorySource: (item && item.categorySource) || null,
-    categorizationConfidence: item && item.aiConfidence !== undefined ? item.aiConfidence : null,
+    categorizationConfidence: item && item.categorizationConfidence !== undefined ? item.categorizationConfidence : (item && item.aiConfidence !== undefined ? item.aiConfidence : null),
     skipAutomation: (item && item.skipAutomation) || false,
+    matchedTopicLabel: (item && item.matchedTopicLabel) || null,
+    matchedRuleId: (item && item.matchedRuleId) || null,
     
     // Scoring fields
-    urgency: (item && item.aiPriority) || null,
+    urgency: (item && item.urgency) || (item && item.aiPriority) || null,
     score: item && item.score,
-    recommendedAction: (item && item.action) || null,
+    recommendedAction: (item && item.recommendedAction) || null,
     
     // Reasons/metadata
-    reasons: (item && item.reason) || (item && item.aiReason) || null,
+    reasons,
+    matchedSignals,
     
     // Legacy fields for backward compatibility
     body: email.body,
@@ -101,9 +118,8 @@ function formatTriageItemForApi(item) {
     read: Boolean(email.read),
     confidence: `${item && item.score}%`,
     action: item && item.action,
-    reason: item && item.reason,
+    reason: reasons[0] || (item && item.reason) || (item && item.aiReason) || null,
     aiPriority: (item && item.aiPriority) || null,
-    primaryCategory: (item && item.primaryCategory) || null,
     aiReason: (item && item.aiReason) || null,
     aiDraftTone: (item && item.aiDraftTone) || null,
     aiConfidence: item && item.aiConfidence !== undefined ? item.aiConfidence : null,
@@ -177,6 +193,11 @@ class DashboardServer {
       try {
         const results = await this.manager.triageEmails();
         const runMeta = this.manager.emailTriage.getLastRunMeta();
+
+        if (runMeta && runMeta.error) {
+          return res.status(500).json({ success: false, error: runMeta.error });
+        }
+
         const formatted = results.map(formatTriageItemForApi);
 
         this.broadcast({
@@ -219,6 +240,19 @@ class DashboardServer {
 
     this.app.get('/api/settings', (req, res) => {
       res.json({ success: true, settings: loadSettings() });
+    });
+
+    this.app.get('/api/graph/mail-folders', async (req, res) => {
+      if (!this.manager || typeof this.manager.listMailFolders !== 'function') {
+        return res.status(503).json({ success: false, error: 'Mail service unavailable' });
+      }
+
+      try {
+        const folders = await this.manager.listMailFolders();
+        res.json({ success: true, folders });
+      } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+      }
     });
 
     this.app.post('/api/settings', (req, res) => {
@@ -469,6 +503,24 @@ class Dashboard {
       } catch (error) {
         console.error('[Dashboard] PUT settings error:', error);
         res.status(400).json({ error: error.message });
+      }
+    });
+
+    this.router.post('/api/emails/:emailId/pin', async (req, res) => {
+      const emailId = req.params.emailId;
+      const { pinned = true } = req.body || {};
+
+      try {
+        const result = await this.manager.setEmailPinned(emailId, Boolean(pinned));
+        res.json({
+          success: true,
+          emailId,
+          pinned: Boolean(pinned),
+          action: result.action,
+        });
+      } catch (error) {
+        console.error('Error updating email pin state:', error.message);
+        res.status(500).json({ error: error.message });
       }
     });
   }

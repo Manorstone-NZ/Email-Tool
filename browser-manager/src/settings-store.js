@@ -8,9 +8,22 @@ const DEFAULTS = {
   emailProvider: 'auto',
   graphClientId: '',
   graphTenantId: 'organizations',
+  archiveFolderId: '',
   lookbackDays: 3,
   minScore: 20,
-  vipSenders: ['ceo@', 'board@', 'vp@', 'director@']
+  vipSenders: ['ceo@', 'board@', 'vp@', 'director@'],
+  aiProviderPrimary: 'claude-opus',
+  aiProviderFallback: 'gemma-lmstudio',
+  anthropicApiKey: '',
+  openaiApiKey: '',
+  aiClaudeModel: 'claude-3-opus-20240229',
+  aiOpenAiModel: 'gpt-4.1',
+  aiGemmaModel: 'gemma-4',
+  aiDraftEnabled: true,
+  draftEligiblePriorities: ['respond-now', 'respond-today'],
+  sendRequiresApproval: true,
+  maxDraftLength: 4000,
+  graphSendEnabled: true,
 };
 
 function loadSettings() {
@@ -40,6 +53,18 @@ function saveSettings(updates) {
     );
     // Keep vip-senders.json in sync
     fs.writeFileSync(VIP_CONFIG_PATH, JSON.stringify({ vipSenders: next.vipSenders }, null, 2), 'utf8');
+  }
+
+  next.sendRequiresApproval = true;
+
+  if (next.maxDraftLength !== undefined) {
+    next.maxDraftLength = Math.max(200, Math.min(12000, Number(next.maxDraftLength) || 4000));
+  }
+
+  if (next.draftEligiblePriorities !== undefined) {
+    next.draftEligiblePriorities = Array.isArray(next.draftEligiblePriorities)
+      ? Array.from(new Set(next.draftEligiblePriorities.map((x) => String(x).trim()).filter(Boolean)))
+      : DEFAULTS.draftEligiblePriorities;
   }
 
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });

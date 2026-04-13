@@ -15,6 +15,26 @@ function _noreplyFrom(email) {
   return local === 'noreply' || local === 'no-reply' || local === 'info' || local.startsWith('noreply') || local.startsWith('no-reply');
 }
 
+function _isMeetingRequest(email) {
+  if (!email) return false;
+  
+  const subject = _normalizeText(email.subject || '');
+  const preview = _normalizeText(email.preview || '');
+  const bodyText = `${subject} ${preview}`;
+  
+  // Calendar meeting keywords
+  const meetingKeywords = /(meeting|calendar|invite|invitation|rsvp|accept|decline|tentative|meeting request|scheduled|appointment|event|conference|webinar|zoom|teams meeting)/;
+  if (!meetingKeywords.test(bodyText)) {
+    return false;
+  }
+  
+  // Filter out emails that just mention meetings in passing (e.g., "meeting notes" in subject)
+  // We want actual calendar invites, not summaries or notes
+  const meetingInviteSignals = /(meeting.*invite|calendar.*invite|invitation|you.*invited|meeting request|accept.*decline|rsvp|scheduled.*meeting)/;
+  
+  return meetingInviteSignals.test(bodyText);
+}
+
 function _matchesRule(email, rule) {
   const senderEmail = _normalizeText(email.senderEmail);
   const senderDomain = _normalizeText(email.senderDomain);
@@ -42,11 +62,29 @@ function _matchesRule(email, rule) {
 
 function _categorizeHeuristic(email) {
   const senderEmail = _normalizeText(email.senderEmail);
-  const bodyText = _normalizeText(`${email.subject || ''} ${email.preview || ''}`);
+  const subject = _normalizeText(email.subject || '');
+  const preview = _normalizeText(email.preview || '');
+  const bodyText = `${subject} ${preview}`;
 
-  const todoSignal = /(can you|please|approve|review|action required|need your|by eod|today)/;
+  // Check for explicit action-oriented language
+  const todoSignal = /(can you|please|approve|review|action required|need your|by eod|by end|asap|urgent|feedback|suggestion|opinion|thoughts)/;
   if (todoSignal.test(bodyText)) {
     return _defaultDecision('todo', 0.7, 'heuristic', ['Action-oriented language detected'], false);
+  }
+
+  // Check for questions (typically expect a response)
+  const questionCount = (preview || '').split('?').length - 1;
+  if (questionCount > 0 && !_noreplyFrom(senderEmail)) {
+    const confidence = Math.min(0.5 + questionCount * 0.15, 0.85);
+    return _defaultDecision('todo', confidence, 'heuristic', [`Email contains ${questionCount} question(s)`], false);
+  }
+
+  // Check if it's a reply or forward (conversation continuation — often requires response)
+  if (subject.startsWith('re:') || subject.startsWith('fw:') || email.threadId) {
+    // But not from noreply/system accounts
+    if (!_noreplyFrom(senderEmail) && !email.isNotification) {
+      return _defaultDecision('to_follow_up', 0.6, 'heuristic', ['Email is a reply/forward in an active thread'], false);
+    }
   }
 
   if (email.isNotification) {
@@ -118,6 +156,18 @@ function categorize(email, settings) {
   if (!settings || typeof settings !== 'object') {
     console.warn('[email-categorizer] Invalid settings object');
     return _defaultDecision('fyi', 0.5, 'heuristic', [], false);
+  }
+
+  // Early detection: skip meeting requests
+  if (_isMeetingRequest(email)) {
+    return {
+      category: 'notification',
+      skipAutomation: true,
+      source: 'meeting_request',
+      confidence: 0.95,
+      isMeetingRequest: true,
+      reasons: ['Email is a calendar meeting request'],
+    };
   }
 
   const customRules = settings.customRules || [];

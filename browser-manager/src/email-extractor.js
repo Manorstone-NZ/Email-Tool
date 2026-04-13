@@ -103,6 +103,8 @@ end tell
 
           return {
             sender: lines[0],
+            senderEmail: lines[0].toLowerCase(),
+            senderDomain: lines[0].includes('@') ? lines[0].split('@')[1].toLowerCase() : '',
             subject: lines[1],
             body: lines.slice(2).join(' ').slice(0, 200),
             flagged: aria.includes('flagged'),
@@ -119,6 +121,10 @@ end tell
       console.error('[EmailExtractor] Failed to extract emails:', error.message);
       return [];
     }
+  }
+
+  async getEmails() {
+    return this.getInboxEmails();
   }
 }
 

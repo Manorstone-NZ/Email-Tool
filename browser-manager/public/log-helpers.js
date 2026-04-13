@@ -1,3 +1,4 @@
+(() => {
 function shouldAppendLiveEvent(liveEnabled) {
   return Boolean(liveEnabled);
 }
@@ -68,3 +69,4 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof window !== 'undefined') {
   window.LogHelpers = api;
 }
+})();

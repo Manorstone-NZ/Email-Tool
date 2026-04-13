@@ -1,3 +1,4 @@
+(() => {
 const ROUTES = ['email', 'logs', 'settings'];
 const RECOMMENDED_ACTIONS = ['Review Later', 'Review / Respond', 'Approve / Decide', 'Review'];
 const EMAIL_STATE_STORAGE_KEY = 'portal.email.state.v1';
@@ -14,3 +15,4 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof window !== 'undefined') {
   window.PortalConstants = api;
 }
+})();

@@ -46,7 +46,7 @@ describe('EmailTriage', () => {
     };
 
     jest.doMock('../src/email-categorizer', () => (email) => {
-      if (email.subject && email.subject.includes('urgent')) {
+      if (email.subject && email.subject.toLowerCase().includes('urgent')) {
         return { category: 'todo', skipAutomation: false, source: 'heuristic', confidence: 0.8, reasons: [] };
       }
       return { category: 'fyi', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: [] };
@@ -106,6 +106,14 @@ describe('EmailTriage', () => {
     expect(result[0].sender).toBe('vip@y.com');
   });
 
+  test('run() should filter items below minScore and report minScore in run meta', async () => {
+    const result = await emailTriage.run(undefined, { minScore: 50 });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].messageId).toBe('msg_1');
+    expect(emailTriage.getLastRunMeta().minScore).toBe(50);
+  });
+
   test('run() should handle null category', async () => {
     jest.resetModules();
     mockGraphAPI.getEmails.mockResolvedValueOnce([
@@ -121,5 +129,40 @@ describe('EmailTriage', () => {
     expect(result[0].category).toBe(null);
     expect(result[0].urgency).toBe(null);
     expect(result[0].score).toBe(null);
+  });
+
+  test('run() should use getInboxEmails when getEmails is unavailable', async () => {
+    const inboxOnlyApi = {
+      getInboxEmails: jest.fn().mockResolvedValue([
+        {
+          messageId: 'msg_1',
+          emailId: 'id_1',
+          threadId: 'thread_1',
+          senderEmail: 'boss@example.com',
+          subject: 'Urgent - Budget Approval',
+          preview: 'Can you approve the Q2 budget?',
+        },
+      ]),
+    };
+
+    const triage = new EmailTriage(inboxOnlyApi, mockActionService, mockSettings, {});
+    const result = await triage.run();
+
+    expect(inboxOnlyApi.getInboxEmails).toHaveBeenCalledTimes(1);
+    expect(result.length).toBe(1);
+  });
+
+  test('run() should fail clearly when Graph token is missing/expired', async () => {
+    const graphApi = {
+      providerName: 'graph',
+      getAccessToken: jest.fn().mockReturnValue(''),
+      getInboxEmails: jest.fn(),
+    };
+
+    const triage = new EmailTriage(graphApi, mockActionService, mockSettings, {});
+    const result = await triage.run();
+
+    expect(result).toEqual([]);
+    expect(graphApi.getInboxEmails).not.toHaveBeenCalled();
   });
 });

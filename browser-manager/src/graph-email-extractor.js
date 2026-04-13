@@ -26,8 +26,13 @@ class GraphEmailExtractor {
     const sender = message?.from?.emailAddress?.address || '';
     const subject = message?.subject || '';
     const searchQuery = encodeURIComponent([sender, subject].filter(Boolean).join(' '));
+    const senderDomain = sender.includes('@') ? sender.split('@')[1].toLowerCase() : '';
+
     return {
+      messageId: message?.id || '',
       sender,
+      senderEmail: sender.toLowerCase(),
+      senderDomain,
       subject,
       body: (message?.bodyPreview || '').slice(0, 200),
       flagged: (message?.flag?.flagStatus || '').toLowerCase() === 'flagged',
@@ -80,6 +85,10 @@ class GraphEmailExtractor {
       console.error('[GraphEmailExtractor] Failed to fetch inbox messages:', error.message);
       return [];
     }
+  }
+
+  async getEmails() {
+    return this.getInboxEmails();
   }
 }
 

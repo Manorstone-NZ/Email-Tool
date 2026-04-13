@@ -28,20 +28,25 @@ class MailActionService {
     }
 
     const userPath = this.user === 'me' ? '/me' : `/users/${encodeURIComponent(this.user)}`;
-    const url = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}`;
+    const moveUrl = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}/move`;
 
-    const response = await fetch(url, {
-      method: 'DELETE',
+    const response = await fetch(moveUrl, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ destinationId: 'deleteditems' }),
     });
 
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Graph delete failed (${response.status}): ${text.slice(0, 300)}`);
     }
+
+    const payload = await response.json();
+    const movedMessageId = payload && payload.id ? payload.id : null;
 
     if (this.eventLogger) {
       this.eventLogger.logAutomationEvent('email-delete-success', {
@@ -54,11 +59,12 @@ class MailActionService {
       success: true,
       action: 'delete',
       emailId,
+      movedMessageId,
       statusCode: response.status,
     };
   }
 
-  async archiveEmail(emailId) {
+  async archiveEmail(emailId, options = {}) {
     if (!emailId) {
       throw new Error('Email ID is required');
     }
@@ -69,23 +75,42 @@ class MailActionService {
     }
 
     const userPath = this.user === 'me' ? '/me' : `/users/${encodeURIComponent(this.user)}`;
-    const url = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}`;
+    const archiveFolderId = options && options.archiveFolderId ? String(options.archiveFolderId).trim() : '';
+    let response;
+    let movedMessageId = null;
 
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        categories: ['Archive'],
-      }),
-    });
+    if (archiveFolderId) {
+      const moveUrl = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}/move`;
+      response = await fetch(moveUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ destinationId: archiveFolderId }),
+      });
+    } else {
+      const patchUrl = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}`;
+      response = await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ categories: ['Archive'] }),
+      });
+    }
 
     if (!response.ok) {
       const text = await response.text();
       throw new Error(`Graph archive failed (${response.status}): ${text.slice(0, 300)}`);
+    }
+
+    if (archiveFolderId) {
+      const payload = await response.json();
+      movedMessageId = payload && payload.id ? payload.id : null;
     }
 
     if (this.eventLogger) {
@@ -99,8 +124,46 @@ class MailActionService {
       success: true,
       action: 'archive',
       emailId,
+      archiveFolderId: archiveFolderId || null,
+      movedMessageId,
       statusCode: response.status,
     };
+  }
+
+  async listMailFolders() {
+    const token = this.tokenStore.getAccessToken();
+    if (!token) {
+      throw new Error('Graph access token missing');
+    }
+
+    const userPath = this.user === 'me' ? '/me' : `/users/${encodeURIComponent(this.user)}`;
+    const url = `${this.baseUrl}${userPath}/mailFolders?$top=200&$select=id,displayName,parentFolderId`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph list folders failed (${response.status}): ${text.slice(0, 300)}`);
+    }
+
+    const payload = await response.json();
+    const folders = Array.isArray(payload.value) ? payload.value : [];
+
+    return folders
+      .map((folder) => ({
+        id: folder.id,
+        displayName: folder.displayName || '',
+        parentFolderId: folder.parentFolderId || null,
+        wellKnownName: folder.wellKnownName || null,
+      }))
+      .filter((folder) => folder.id && folder.displayName)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }
 
   async markAsRead(emailId, isRead = true) {
@@ -146,6 +209,55 @@ class MailActionService {
       action: 'mark-read',
       emailId,
       isRead,
+      statusCode: response.status,
+    };
+  }
+
+  async setPinned(emailId, pinned = true) {
+    if (!emailId) {
+      throw new Error('Email ID is required');
+    }
+
+    const token = this.tokenStore.getAccessToken();
+    if (!token) {
+      throw new Error('Graph access token missing');
+    }
+
+    const userPath = this.user === 'me' ? '/me' : `/users/${encodeURIComponent(this.user)}`;
+    const url = `${this.baseUrl}${userPath}/messages/${encodeURIComponent(emailId)}`;
+
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        flag: {
+          flagStatus: pinned ? 'flagged' : 'notFlagged',
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph pin update failed (${response.status}): ${text.slice(0, 300)}`);
+    }
+
+    if (this.eventLogger) {
+      this.eventLogger.logAutomationEvent('email-pin-success', {
+        emailId,
+        pinned: Boolean(pinned),
+        statusCode: response.status,
+      });
+    }
+
+    return {
+      success: true,
+      action: 'pin',
+      emailId,
+      pinned: Boolean(pinned),
       statusCode: response.status,
     };
   }

@@ -13,6 +13,15 @@ test('mergeEmailUiState overlays pinned and done by id', () => {
   expect(mergeEmailUiState(items, persisted)[1].uiState.flagged).toBe(false);
 });
 
+test('mergeEmailUiState treats flagged server items as pinned when no local pin exists', () => {
+  const items = [{ id: 'a', flagged: true }];
+  const persisted = {};
+
+  const merged = mergeEmailUiState(items, persisted);
+  expect(merged[0].uiState.flagged).toBe(true);
+  expect(merged[0].uiState.pinned).toBe(true);
+});
+
 test('mergeEmailUiState never writes flagged state from persisted storage', () => {
   const items = [{ id: 'a', flagged: false }];
   const persisted = { a: { pinned: false, done: false, flagged: true, updatedAt: '2026-04-12T00:00:00.000Z' } };

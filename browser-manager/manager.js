@@ -259,7 +259,11 @@ class BrowserManager {
   }
 
   async triageEmails() {
-    const results = await this.emailTriage.run();
+    const minScore = Number(this.settings.minScore);
+    const results = await this.emailTriage.run(undefined, {
+      minScore: Number.isFinite(minScore) ? minScore : undefined,
+      vipEmails: Array.isArray(this.emailScorer?.vipSenders) ? this.emailScorer.vipSenders : [],
+    });
     this.lastTriageById.clear();
     results.forEach((result) => {
       const email = result && result.email;
@@ -365,7 +369,9 @@ class BrowserManager {
     const email = this.getEmailById(id);
     const graphMessageId = (email && email.messageId) ? email.messageId : id;
 
-    const result = await this.mailActionService.archiveEmail(graphMessageId);
+    const result = await this.mailActionService.archiveEmail(graphMessageId, {
+      archiveFolderId: this.settings.archiveFolderId,
+    });
     this.eventLogger.logUserEvent('email-archived', {
       emailId: id,
       graphMessageId,
@@ -374,12 +380,31 @@ class BrowserManager {
     return result;
   }
 
+  async listMailFolders() {
+    return this.mailActionService.listMailFolders();
+  }
+
   async markEmailRead(emailId, isRead = true) {
     const id = String(emailId);
     const result = await this.mailActionService.markAsRead(id, isRead);
     this.eventLogger.logUserEvent('email-mark-read', {
       emailId: id,
       isRead,
+      statusCode: result.statusCode,
+    });
+    return result;
+  }
+
+  async setEmailPinned(emailId, pinned = true) {
+    const id = String(emailId);
+    const email = this.getEmailById(id);
+    const graphMessageId = (email && email.messageId) ? email.messageId : id;
+
+    const result = await this.mailActionService.setPinned(graphMessageId, pinned);
+    this.eventLogger.logUserEvent('email-pin-updated', {
+      emailId: id,
+      graphMessageId,
+      pinned: Boolean(pinned),
       statusCode: result.statusCode,
     });
     return result;

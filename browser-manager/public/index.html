@@ -37,9 +37,7 @@
                 <div class="rail-section">
                     <h3 class="rail-heading">Tags</h3>
                     <ul class="rail-list" id="tagList">
-                        <li><button type="button" class="rail-filter" data-tag="Approval">Approval <span class="rail-count" id="count-tag-approval"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-tag="Vendor">Vendor <span class="rail-count" id="count-tag-vendor"></span></button></li>
-                        <li><button type="button" class="rail-filter" data-tag="Urgent">Urgent <span class="rail-count" id="count-tag-urgent"></span></button></li>
+                        <li><button type="button" class="rail-filter" data-tag="">All Tags</button></li>
                     </ul>
                 </div>
             </aside>
@@ -128,6 +126,13 @@
                 <div class="setting-group">
                     <label for="setting-minScore">Triage Threshold (%)</label>
                     <input id="setting-minScore" type="number" name="minScore" min="0" max="100">
+                </div>
+                <div class="setting-group">
+                    <label for="setting-archiveFolder">Archive Destination Folder</label>
+                    <select id="setting-archiveFolder" name="archiveFolderId">
+                        <option value="">Default archive behavior</option>
+                    </select>
+                    <small>When set, Archive action moves emails into this Outlook folder.</small>
                 </div>
                 <div class="setting-group">
                     <label for="setting-lookbackDays">Inbox Lookback (days)</label>

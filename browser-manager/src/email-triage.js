@@ -27,6 +27,7 @@ class EmailTriage extends EventEmitter {
     this.lastRunMeta = {
       totalExtracted: 0,
       minScore: null,
+      error: null,
     };
   }
 
@@ -46,16 +47,41 @@ class EmailTriage extends EventEmitter {
     const settings = this.categorizationSettings?.getSettings?.() || {};
     const categorize = require('./email-categorizer');
     const score = require('./email-scorer');
+    const parsedMinScore = Number(options.minScore);
+    const effectiveMinScore = Number.isFinite(parsedMinScore) ? parsedMinScore : 20;
 
     // If no categorizer, fallback to direct scorer (legacy mode)
     const useCategorizer = Boolean(categorize && settings);
 
     let emails;
     try {
-      emails = await this.graphAPI.getEmails(onlyMailbox);
+      if (
+        this.graphAPI
+        && this.graphAPI.providerName === 'graph'
+        && typeof this.graphAPI.getAccessToken === 'function'
+        && !this.graphAPI.getAccessToken()
+      ) {
+        throw new Error('Graph access token is missing or expired. Run: npm run graph-auth');
+      }
+
+      const fetchEmails = this.graphAPI && (
+        this.graphAPI.getEmails
+        || this.graphAPI.getInboxEmails
+      );
+
+      if (typeof fetchEmails !== 'function') {
+        throw new Error('Email provider does not implement getEmails/getInboxEmails');
+      }
+
+      emails = await fetchEmails.call(this.graphAPI, onlyMailbox);
     } catch (error) {
       console.error('[EmailTriage.run] Failed to fetch emails:', error.message);
       this.emit('triage-error', { error: error.message });
+      this.lastRunMeta = {
+        totalExtracted: 0,
+        minScore: effectiveMinScore,
+        error: error.message,
+      };
       return [];
     }
 
@@ -74,6 +100,11 @@ class EmailTriage extends EventEmitter {
           console.warn('[EmailTriage.run] Categorisation error:', error.message);
           decision = { category: 'fyi', skipAutomation: false, source: 'heuristic', confidence: 0.5, reasons: ['Categorisation failed; defaulted to fyi'] };
         }
+      }
+
+      // Early skip: meeting requests are not actionable in this triage context
+      if (decision && decision.isMeetingRequest) {
+        continue;
       }
 
       // Step 2: Check for null category (should be rare)
@@ -110,10 +141,17 @@ class EmailTriage extends EventEmitter {
       triageItems.push(item);
     }
 
-    // Filter: remove marketing by default unless included
-    const filtered = options.includeMarketing 
-      ? triageItems 
-      : triageItems.filter(item => item.category !== 'marketing');
+    // Filter by score threshold first, then remove marketing unless explicitly included.
+    const scoreFiltered = triageItems.filter((item) => {
+      if (typeof item.score !== 'number') {
+        return true;
+      }
+      return item.score >= effectiveMinScore;
+    });
+
+    const filtered = options.includeMarketing
+      ? scoreFiltered
+      : scoreFiltered.filter(item => item.category !== 'marketing');
 
     // Sort: by score descending
     filtered.sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -143,7 +181,8 @@ class EmailTriage extends EventEmitter {
     this.lastTriageResult = filtered;
     this.lastRunMeta = {
       totalExtracted: emails.length,
-      minScore: options.minScore ?? null,
+      minScore: effectiveMinScore,
+      error: null,
     };
 
     this.emit('triage-complete', {
@@ -182,6 +221,8 @@ class EmailTriage extends EventEmitter {
       categorySource: decision?.source || null,
       categorizationConfidence: decision?.confidence || null,
       skipAutomation: decision?.skipAutomation || false,
+      matchedTopicLabel: decision?.matchedTopicLabel || null,
+      matchedRuleId: decision?.matchedRuleId || null,
 
       // Scoring fields
       urgency: scoring?.urgency || null,

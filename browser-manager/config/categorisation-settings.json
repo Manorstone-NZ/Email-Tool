@@ -7,6 +7,57 @@
     "notification": { "enabled": false, "topicLabelsEnabled": true },
     "marketing": { "enabled": false, "topicLabelsEnabled": true }
   },
-  "topicLabels": [],
-  "customRules": []
+  "topicLabels": [
+    {
+      "id": "label_jira_ticket",
+      "key": "jira-ticket",
+      "mapsToCategory": "notification",
+      "patterns": ["MTNZSUP", "MTNZDEV", "jira"],
+      "enabled": true
+    },
+    {
+      "id": "label_license_renewal",
+      "key": "license-renewal",
+      "mapsToCategory": "fyi",
+      "patterns": ["license", "expires", "renewal"],
+      "enabled": true
+    },
+    {
+      "id": "label_site_report",
+      "key": "site-report",
+      "mapsToCategory": "notification",
+      "patterns": ["site report", "monthly report", "milktest spark"],
+      "enabled": true
+    }
+  ],
+  "customRules": [
+    {
+      "id": "rule_atlassian",
+      "type": "sender_domain",
+      "value": "atlassian.net",
+      "action": "notification",
+      "enabled": true
+    },
+    {
+      "id": "rule_office365",
+      "type": "sender_domain",
+      "value": "office365.com",
+      "action": "notification",
+      "enabled": true
+    },
+    {
+      "id": "rule_ms_security",
+      "type": "sender_email",
+      "value": "MSSecurity-noreply@microsoft.com",
+      "action": "notification",
+      "enabled": true
+    },
+    {
+      "id": "rule_spark",
+      "type": "sender_domain",
+      "value": "spark.co.nz",
+      "action": "fyi",
+      "enabled": true
+    }
+  ]
 }

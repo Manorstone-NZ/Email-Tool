@@ -1,3 +1,4 @@
+(() => {
 let constants = {
   ROUTES: ['email', 'logs', 'settings'],
   EMAIL_STATE_STORAGE_KEY: 'portal.email.state.v1',
@@ -66,7 +67,11 @@ function mergeEmailUiState(items, persisted) {
       ...item,
       uiState: {
         flagged: Boolean(item && item.flagged),
-        pinned: Boolean(localState && localState.pinned),
+        pinned: Boolean(
+          (localState && localState.pinned)
+          || (item && item.pinned)
+          || (item && item.flagged)
+        ),
         done: Boolean(localState && localState.done),
       },
     };
@@ -86,3 +91,4 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof window !== 'undefined') {
   window.PortalState = api;
 }
+})();

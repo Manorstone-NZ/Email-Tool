@@ -1,3 +1,4 @@
+(() => {
 let constants = {
   RECOMMENDED_ACTIONS: ['Review Later', 'Review / Respond', 'Approve / Decide', 'Review'],
 };
@@ -43,6 +44,7 @@ function derivePrimaryCategory(item) {
 
   const action = deriveRecommendedAction(item);
   const reasonText = toLower(item && item.reason);
+  const internalCategory = item && item.category;
 
   if (action === 'Review / Respond') {
     return 'Needs Reply';
@@ -50,7 +52,24 @@ function derivePrimaryCategory(item) {
   if (reasonText.includes('waiting')) {
     return 'Waiting on Others';
   }
+  
+  // Map internal categories to UI categories
+  if (internalCategory === 'todo') {
+    return 'Needs Reply';
+  }
+  if (internalCategory === 'to_follow_up') {
+    return 'Waiting on Others';
+  }
+  
   return 'FYI';
+}
+
+function deriveCategorySource(item) {
+  if (item && VALID_CATEGORIES.includes(item.primaryCategory)) {
+    return 'ai';
+  }
+
+  return 'heuristic';
 }
 
 function deriveEmailTags(item) {
@@ -64,6 +83,16 @@ function deriveEmailTags(item) {
   const subject = toLower(item && item.subject);
   const reason = toLower(item && item.reason);
   const joined = `${sender} ${subject} ${reason}`;
+
+  // Topic label from categoriser — show as a tag pill
+  const matchedTopicLabel = item && item.matchedTopicLabel;
+  if (matchedTopicLabel) {
+    // Convert key like 'billing-invoices' → 'Billing Invoices'
+    const display = String(matchedTopicLabel)
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    tags.push(display);
+  }
 
   if (action === 'Approve / Decide') {
     tags.push('Approval');
@@ -100,13 +129,19 @@ function mapEmailItem(item, ingestedAt) {
   const subject = String((item && item.subject) || '');
   const stableSource = `${toLower(sender)}|${toLower(subject)}`;
   const fallbackId = `email-${hashString(stableSource)}`;
+  const resolvedId = (item && item.id)
+    || (item && item.messageId)
+    || (item && item.threadId)
+    || (item && item.openUrl)
+    || fallbackId;
 
   return {
     ...item,
-    id: (item && item.threadId) || (item && item.openUrl) || fallbackId,
+    id: resolvedId,
     ingestedAt,
     recommendedAction: deriveRecommendedAction(item),
     primaryCategory: derivePrimaryCategory(item),
+    categorySource: deriveCategorySource(item),
     tags: deriveEmailTags(item),
     scoreMeta: deriveScoreMeta(item),
     uiState: deriveUiState(item, null),
@@ -136,6 +171,9 @@ function filterEmailItems(items, filters) {
   const safeItems = Array.isArray(items) ? items : [];
   const safeFilters = filters || {};
   const searchText = toLower(safeFilters.search).trim();
+  const stateOverridesCategory = safeFilters.state === 'Flagged'
+    || safeFilters.state === 'Pinned'
+    || safeFilters.state === 'Done';
 
   return safeItems
     .filter((item) => matchesSearch(item, searchText))
@@ -147,6 +185,9 @@ function filterEmailItems(items, filters) {
     })
     .filter((item) => {
       if (!safeFilters.category) {
+        return true;
+      }
+      if (stateOverridesCategory) {
         return true;
       }
       return item && item.primaryCategory === safeFilters.category;
@@ -222,6 +263,7 @@ const api = {
   deriveRecommendedAction,
   deriveEmailTags,
   derivePrimaryCategory,
+  deriveCategorySource,
   deriveScoreMeta,
   deriveUiState,
   resolveDisplayTimestamp,
@@ -237,3 +279,4 @@ if (typeof module !== 'undefined' && module.exports) {
 if (typeof window !== 'undefined') {
   window.EmailHelpers = api;
 }
+})();

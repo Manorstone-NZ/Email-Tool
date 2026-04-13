@@ -130,4 +130,21 @@ describe('Categorisation UI Components', () => {
       expect(typeof renderCategoryBadge).toBe('function');
     });
   });
+
+  describe('Filter Toggle Behavior', () => {
+    test('toggleFilterValue clears active value when clicked again', () => {
+      const { toggleFilterValue } = require('../../public/app.js');
+      expect(toggleFilterValue('Vendor', 'Vendor')).toBe(null);
+    });
+
+    test('toggleFilterValue sets new value when different tag clicked', () => {
+      const { toggleFilterValue } = require('../../public/app.js');
+      expect(toggleFilterValue('Vendor', 'Approval')).toBe('Approval');
+    });
+
+    test('toggleFilterValue clears filter for empty selection', () => {
+      const { toggleFilterValue } = require('../../public/app.js');
+      expect(toggleFilterValue('Vendor', '')).toBe(null);
+    });
+  });
 });

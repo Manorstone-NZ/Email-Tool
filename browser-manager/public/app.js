@@ -58,7 +58,7 @@ class DashboardClient {
           this.triageItems = data.data;
             this.triageMeta = {
               extractedCount: Number(data?.meta?.totalExtracted || 0),
-              minScore: Number(data?.meta?.minScore || this.triageMeta.minScore || 35)
+              minScore: Number(data?.meta?.minScore ?? this.triageMeta.minScore ?? 35)
             };
           this.renderTriage();
         } else if (data.type === 'settings_updated') {
@@ -186,9 +186,53 @@ class DashboardClient {
       if (!data.success) return;
       const s = data.settings;
       this.fillSettingsForm(s);
+      await this.loadArchiveFolderOptions(s.archiveFolderId || '');
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
+
+    const panel = document.getElementById('settings-panel');
+    if (panel) {
+      const api = {
+        getSettings: () => fetch('/api/settings/categorisation').then(r => r.json()),
+        putSettings: (settings) => fetch('/api/settings/categorisation', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings),
+        }).then(r => r.json()),
+      };
+      await renderSettingsPanel(panel, api);
+    }
+  }
+
+  async loadArchiveFolderOptions(selectedFolderId) {
+    const selectEl = document.getElementById('setting-archiveFolder');
+    if (!selectEl) {
+      return;
+    }
+
+    const currentSelection = String(selectedFolderId || selectEl.value || '');
+    selectEl.innerHTML = '<option value="">Default archive behavior</option>';
+
+    try {
+      const res = await fetch('/api/graph/mail-folders');
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      const folders = Array.isArray(data.folders) ? data.folders : [];
+      folders.forEach((folder) => {
+        const option = document.createElement('option');
+        option.value = folder.id;
+        option.textContent = folder.displayName;
+        selectEl.appendChild(option);
+      });
+    } catch (error) {
+      console.warn('Failed to load mail folders for archive picklist:', error.message);
+    }
+
+    selectEl.value = currentSelection;
   }
 
   async openDraftEditorModal({ subject, body, providerNotice }) {
@@ -435,6 +479,7 @@ class DashboardClient {
       'emailProvider',
       'graphClientId',
       'graphTenantId',
+      'archiveFolderId',
       'lookbackDays',
       'minScore',
       'vipSenders',
@@ -449,6 +494,7 @@ class DashboardClient {
     if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
     if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
     if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
+    if (f('setting-archiveFolder')) f('setting-archiveFolder').value = s.archiveFolderId || '';
     if (f('setting-lookbackDays')) f('setting-lookbackDays').value = s.lookbackDays ?? 3;
     if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
     if (f('setting-aiPrimary')) f('setting-aiPrimary').value = s.aiProviderPrimary || 'claude-opus';
@@ -494,6 +540,7 @@ class DashboardClient {
         emailProvider: formData.get('emailProvider'),
         graphClientId: formData.get('graphClientId'),
         graphTenantId: formData.get('graphTenantId') || 'organizations',
+        archiveFolderId: formData.get('archiveFolderId') || '',
         lookbackDays: Number(formData.get('lookbackDays')) || 3,
         minScore: Number(formData.get('minScore')) || 20,
         vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
@@ -548,7 +595,7 @@ class DashboardClient {
       this.triageItems = data.items || [];
       this.triageMeta = {
         extractedCount: Number(data.extractedCount || 0),
-        minScore: Number(data.minScore || this.triageMeta.minScore || 35)
+        minScore: Number(data.minScore ?? this.triageMeta.minScore ?? 35)
       };
       this.renderTriage();
     } catch (error) {
@@ -616,9 +663,6 @@ class DashboardClient {
       'count-state-flagged': counts.states.Flagged || 0,
       'count-state-pinned': counts.states.Pinned || 0,
       'count-state-done': counts.states.Done || 0,
-      'count-tag-approval': counts.tags.Approval || 0,
-      'count-tag-vendor': counts.tags.Vendor || 0,
-      'count-tag-urgent': counts.tags.Urgent || 0,
     };
 
     Object.entries(countMap).forEach(([id, value]) => {
@@ -626,6 +670,46 @@ class DashboardClient {
       if (el) {
         el.textContent = value > 0 ? `(${value})` : '';
       }
+    });
+
+    this.renderTagRail(counts.tags || {});
+  }
+
+  renderTagRail(tagCounts) {
+    const tagList = document.getElementById('tagList');
+    if (!tagList) {
+      return;
+    }
+
+    const entries = Object.entries(tagCounts || {})
+      .filter(([, count]) => Number(count) > 0)
+      .sort((a, b) => {
+        if (b[1] !== a[1]) {
+          return b[1] - a[1];
+        }
+        return String(a[0]).localeCompare(String(b[0]));
+      });
+
+    tagList.innerHTML = '';
+
+    const allLi = document.createElement('li');
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'rail-filter';
+    allBtn.dataset.tag = '';
+    allBtn.textContent = 'All Tags';
+    allLi.appendChild(allBtn);
+    tagList.appendChild(allLi);
+
+    entries.forEach(([tag, count]) => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'rail-filter';
+      btn.dataset.tag = String(tag);
+      btn.textContent = `${tag} (${count})`;
+      li.appendChild(btn);
+      tagList.appendChild(li);
     });
   }
 
@@ -687,7 +771,9 @@ class DashboardClient {
       const openUrl = item && item.openUrl;
       const safeOpenUrl = openUrl && isSafeUrl(openUrl) ? openUrl : '';
       const initial = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
-      const reasonText = String((item && item.reason) || 'No explicit reason provided.');
+      const reasonText = Array.isArray(item && item.reasons) && item.reasons.length
+        ? item.reasons.join(' | ')
+        : String((item && item.reason) || 'No explicit reason provided.');
       const matchedSignals = Array.isArray(item && item.matchedSignals)
         ? item.matchedSignals
         : (Array.isArray(item && item.signals) ? item.signals : []);
@@ -876,16 +962,32 @@ class DashboardClient {
         }
       });
 
-      pinEl.addEventListener('click', (event) => {
+      pinEl.addEventListener('click', async (event) => {
         event.stopPropagation();
 
         if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
           return;
         }
 
-        const state = PortalState.readEmailUiState();
         const currentUiState = item && item.uiState ? item.uiState : {};
         const newPinnedValue = !Boolean(currentUiState.pinned);
+
+        try {
+          const response = await fetch(`/api/emails/${encodeURIComponent(itemId)}/pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pinned: Boolean(newPinnedValue) }),
+          });
+          const payload = await response.json();
+          if (!payload.success) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+        } catch (error) {
+          alert(`Failed to update pin state in Outlook: ${error.message}`);
+          return;
+        }
+
+        const state = PortalState.readEmailUiState();
         const newDoneValue = Boolean(currentUiState.done);
         state[itemId] = {
           pinned: Boolean(newPinnedValue),
@@ -1168,6 +1270,14 @@ function syncRouteHash(route) {
   }
 }
 
+function toggleFilterValue(currentValue, nextValue) {
+  const next = nextValue || null;
+  if (!next) {
+    return null;
+  }
+  return currentValue === next ? null : next;
+}
+
 // Initialize dashboard on page load
 let dashboard = null;
 
@@ -1214,12 +1324,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  document.querySelectorAll('[data-tag]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashboard.emailFilters.tag = btn.dataset.tag || null;
+  const tagList = document.getElementById('tagList');
+  if (tagList) {
+    tagList.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-tag]');
+      if (!target) {
+        return;
+      }
+      dashboard.emailFilters.tag = toggleFilterValue(dashboard.emailFilters.tag, target.dataset.tag);
       dashboard.renderTriage();
     });
-  });
+  }
 
   const emailSearch = document.getElementById('emailSearch');
   if (emailSearch) {
@@ -1491,11 +1606,43 @@ async function renderSettingsPanel(container, api) {
       li.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
         settings.topicLabels = settings.topicLabels.filter(l => l.id !== label.id);
-        api.putSettings(settings);
+        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
       });
       labelsList.appendChild(li);
     }
-    
+
+    addLabelBtn.addEventListener('click', () => {
+      if (labelsList.querySelector('.new-label-form')) return;
+      const li = document.createElement('li');
+      li.className = 'label-item new-label-form';
+      li.innerHTML = `
+        <input type="text" class="new-label-key" placeholder="Label key (e.g. billing)" />
+        <select class="new-label-category">
+          <option value="todo">todo</option>
+          <option value="fyi">fyi</option>
+          <option value="to_follow_up">to_follow_up</option>
+          <option value="notification">notification</option>
+          <option value="marketing">marketing</option>
+        </select>
+        <input type="text" class="new-label-patterns" placeholder="Patterns, comma-separated (e.g. invoice,billing)" />
+        <button class="save-new-label-btn">Save</button>
+        <button class="cancel-new-label-btn">Cancel</button>
+      `;
+      li.querySelector('.cancel-new-label-btn').addEventListener('click', () => li.remove());
+      li.querySelector('.save-new-label-btn').addEventListener('click', () => {
+        const key = li.querySelector('.new-label-key').value.trim();
+        const mapsToCategory = li.querySelector('.new-label-category').value;
+        const patterns = li.querySelector('.new-label-patterns').value.split(',').map(p => p.trim()).filter(Boolean);
+        if (!key || patterns.length === 0) {
+          alert('Label key and at least one pattern are required.');
+          return;
+        }
+        settings.topicLabels.push({ id: `label_${Date.now()}`, key, mapsToCategory, patterns, enabled: true });
+        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
+      });
+      labelsList.appendChild(li);
+    });
+
     labelsSection.appendChild(labelsList);
     container.appendChild(labelsSection);
 
@@ -1523,11 +1670,49 @@ async function renderSettingsPanel(container, api) {
       li.querySelector('.delete-button').addEventListener('click', (e) => {
         e.preventDefault();
         settings.customRules = settings.customRules.filter(r => r.id !== rule.id);
-        api.putSettings(settings);
+        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
       });
       rulesList.appendChild(li);
     }
-    
+
+    addRuleBtn.addEventListener('click', () => {
+      if (rulesList.querySelector('.new-rule-form')) return;
+      const li = document.createElement('li');
+      li.className = 'rule-item new-rule-form';
+      li.innerHTML = `
+        <select class="new-rule-type">
+          <option value="sender_email">sender_email</option>
+          <option value="sender_domain">sender_domain</option>
+          <option value="subject_contains">subject_contains</option>
+          <option value="subject_exact">subject_exact</option>
+        </select>
+        <input type="text" class="new-rule-value" placeholder="Value (e.g. noreply@example.com)" />
+        <select class="new-rule-action">
+          <option value="todo">todo</option>
+          <option value="fyi">fyi</option>
+          <option value="to_follow_up">to_follow_up</option>
+          <option value="notification">notification</option>
+          <option value="marketing">marketing</option>
+          <option value="skip_automation">skip_automation</option>
+        </select>
+        <button class="save-new-rule-btn">Save</button>
+        <button class="cancel-new-rule-btn">Cancel</button>
+      `;
+      li.querySelector('.cancel-new-rule-btn').addEventListener('click', () => li.remove());
+      li.querySelector('.save-new-rule-btn').addEventListener('click', () => {
+        const type = li.querySelector('.new-rule-type').value;
+        const value = li.querySelector('.new-rule-value').value.trim();
+        const action = li.querySelector('.new-rule-action').value;
+        if (!value) {
+          alert('Value is required.');
+          return;
+        }
+        settings.customRules.push({ id: `rule_${Date.now()}`, type, value, action, enabled: true });
+        api.putSettings(settings).then(() => renderSettingsPanel(container, api));
+      });
+      rulesList.appendChild(li);
+    });
+
     rulesSection.appendChild(rulesList);
     container.appendChild(rulesSection);
 
@@ -1576,7 +1761,7 @@ function handleSettingsUpdated(message) {
 
 // Export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated };
+  module.exports = { renderCategoryBadge, getCategoryColour, getCategoryDisplayName, renderSettingsPanel, updateSettings, handleSettingsUpdated, toggleFilterValue };
 } else {
   window.renderCategoryBadge = renderCategoryBadge;
   window.getCategoryColour = getCategoryColour;
