@@ -343,7 +343,9 @@ Right panel showing the selected email and AI draft.
 - Avatar (40px) + Subject (18px/700) + Sender name, email, timestamp (12px muted).
 - Right side: Category badge + tag pills + score badge (shows numeric score, e.g., "Score: 85" with heat-gradient color).
 - Below header: **Score detail strip** (collapsible, collapsed by default) — clicking the score badge toggles it. Shows: urgency level, recommended action, and scoring reasons as a small muted list. This gives full transparency into why the email was ranked where it is.
-- Below: Action button bar — Reply, Pin, Archive, Mark Done (`.btn` secondary). Delete isolated on right (`.btn` danger).
+- Below: Action button bar — Reply, Pin, **Move to...**, Archive, Mark Done (`.btn` secondary). Delete isolated on right (`.btn` danger).
+
+**Move to folder:** The "Move to..." button opens a dropdown/popover listing all available Outlook folders (fetched from `GET /api/graph/mail-folders`). Clicking a folder moves the email there via the existing Graph API (`PATCH /me/messages/:id` with `parentFolderId`). The dropdown is cached per session (folders don't change often). After moving, the email is removed from the triage list and the next email is auto-selected. The "Archive" button remains as a convenience shortcut that moves to the configured default archive folder.
 
 **Body section (scrollable):**
 - Clean reading area. `font-size: 14px; line-height: 1.65; color: var(--text-secondary);`

@@ -881,22 +881,39 @@ New structure:
 - Body: email text
 - AI Draft card (if draft exists): AI icon + label + provider + draft text + Send/Edit/Regenerate buttons
 
-- [ ] **Step 2: Implement inline draft editing**
+- [ ] **Step 2: Add "Move to..." folder action**
+
+Add a "Move to..." button in the reader action bar. On click, it opens a dropdown popover listing Outlook folders (fetched once from `GET /api/graph/mail-folders` and cached in `this.folderCache`). Clicking a folder calls a new method `moveEmailToFolder(emailId, folderId)` that does `POST /api/emails/:id/move` (or reuse the existing Graph patch mechanism via a new endpoint). After moving, remove the email from `triageItems` and auto-select the next email.
+
+New backend endpoint in `dashboard.js`:
+```js
+app.post('/api/emails/:id/move', async (req, res) => {
+  const { folderId } = req.body;
+  if (!folderId) return res.status(400).json({ error: 'folderId required' });
+  // Use mailActionService._graphPatch to move email
+  const result = await this.manager.moveEmail(req.params.id, folderId);
+  res.json(result);
+});
+```
+
+Add `moveEmail(emailId, folderId)` to `manager.js` that resolves the Graph message ID and patches `parentFolderId`.
+
+- [ ] **Step 3: Implement inline draft editing**
 
 Replace `showDraftEditorModal()` (Promise-based modal) with inline editing:
 - "Edit" button transforms the draft card to editing mode: textarea + subject input + Save/Cancel
 - "Send Draft" shows "Confirm Send?" for 3 seconds, then reverts
 - Wire up `generateDraft()`, `sendDraft()` to work with inline UI
 
-- [ ] **Step 3: Remove draft modal from HTML**
+- [ ] **Step 4: Remove draft modal from HTML**
 
 Delete the `#draftEditorModal` section from `index.html`. Remove `draft-editor-helpers.js` script tag (the `calculateEditorRows` function is no longer needed — textarea auto-sizes).
 
-- [ ] **Step 4: Verify reader pane and draft flow**
+- [ ] **Step 5: Verify reader pane, draft flow, and move-to-folder**
 
-Click an email → confirm reader pane shows with new layout. Click "Edit" on a draft → confirm inline editing. Click "Send Draft" → confirm 3-second confirmation.
+Click an email → confirm reader pane shows with new layout. Click "Edit" on a draft → confirm inline editing. Click "Send Draft" → confirm 3-second confirmation. Click "Move to..." → confirm folder dropdown appears, selecting a folder moves the email.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add public/app.js public/index.html
