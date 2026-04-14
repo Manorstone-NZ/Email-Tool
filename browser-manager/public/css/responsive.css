@@ -1,0 +1,148 @@
+/* ── Tablet: 768–1099px ── */
+@media (max-width: 1099px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .icon-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 220px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    z-index: 1000;
+    padding: 18px 14px;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* When drawer is open */
+  body.drawer-open .icon-rail {
+    transform: translateX(0);
+  }
+
+  /* Add text labels next to icons in drawer mode */
+  .icon-rail .nav-icon {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  /* Show nav labels (hidden by default, visible in drawer) */
+  .nav-icon__label {
+    display: inline;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .nav-icon.is-active .nav-icon__label {
+    color: var(--accent-brand);
+  }
+
+  /* Hamburger button */
+  .drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1101;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    padding: 8px 12px;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+
+  /* Overlay when drawer open */
+  .drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 999;
+  }
+
+  body.drawer-open .drawer-overlay { display: block; }
+
+  .portal-main {
+    padding-top: 56px;
+  }
+}
+
+/* Hide drawer toggle on desktop */
+@media (min-width: 1100px) {
+  .drawer-toggle { display: none !important; }
+  .drawer-overlay { display: none !important; }
+  .nav-icon__label { display: none; }
+}
+
+/* ── Mobile: <768px ── */
+@media (max-width: 767px) {
+  .email-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .email-list-panel {
+    width: 100%;
+    border-right: none;
+    height: auto;
+    min-height: 0;
+  }
+
+  .reader-pane {
+    display: none;
+    width: 100%;
+    min-height: calc(100vh - 56px);
+  }
+
+  /* When reader is open on mobile */
+  .email-workspace.is-reader-open .email-list-panel { display: none; }
+  .email-workspace.is-reader-open .reader-pane { display: block; }
+
+  /* Mobile back button */
+  .mobile-reader-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--border-input);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border-radius: var(--radius-pill);
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+
+  /* Hide mobile back button on larger screens */
+  @media (min-width: 768px) {
+    .mobile-reader-back { display: none; }
+  }
+
+  /* Filter pills wrap */
+  .filter-bar__categories { flex-wrap: wrap; }
+  .filter-bar__state { flex-wrap: wrap; }
+
+  /* Toolbar stack */
+  .email-toolbar { flex-direction: column; align-items: stretch; }
+
+  /* Settings responsive */
+  .stat-grid { grid-template-columns: 1fr; }
+  .provider-options { flex-direction: column; }
+  .settings-save-bar { flex-wrap: wrap; }
+
+  /* Logs responsive */
+  .logs-summary { flex-direction: column; }
+  .logs-filters { flex-wrap: wrap; }
+  .logs-search-wrap { width: 100%; margin-left: 0; }
+}

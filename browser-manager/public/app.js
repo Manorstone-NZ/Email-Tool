@@ -199,6 +199,10 @@ class DashboardClient {
       console.error('Failed to load settings:', e);
     }
     this.setupGraphAuthButton();
+    this.checkGraphTokenExpiry();
+    if (!this._graphExpiryInterval) {
+      this._graphExpiryInterval = setInterval(() => this.checkGraphTokenExpiry(), 60000);
+    }
   }
 
   async loadArchiveFolderOptions(selectedFolderId) {
@@ -1311,6 +1315,7 @@ class DashboardClient {
       // Update local cache
       this._settingsData = payload;
       this._setSettingsDirty(false);
+      this.showToast('success', 'Settings saved successfully');
     } catch (e) {
       console.error('Save settings error:', e);
       alert('Failed to save settings: ' + e.message);
@@ -1338,11 +1343,49 @@ class DashboardClient {
 
     const s = this._settingsData || {};
     const isConnected = s.graphClientId && s.graphTenantId;
-    const statusClass = isConnected ? 'success' : 'error';
-    const statusLabel = isConnected ? 'Connected' : 'Disconnected';
-    const statusIcon = isConnected
+
+    // Derive live token state from _graphTokenExpiry
+    const tokenExpiry = this._graphTokenExpiry;
+    let tokenStatusClass = 'neutral';
+    let tokenStatusLabel = 'Unknown';
+    let statusClass;
+    let statusLabel;
+    if (isConnected) {
+      if (tokenExpiry) {
+        const remainingMs = tokenExpiry - Date.now();
+        const fifteenMin = 15 * 60 * 1000;
+        if (remainingMs <= 0) {
+          tokenStatusClass = 'error';
+          tokenStatusLabel = 'Expired';
+          statusClass = 'error';
+          statusLabel = 'Token Expired';
+        } else if (remainingMs <= fifteenMin) {
+          tokenStatusClass = 'warning';
+          tokenStatusLabel = 'Expiring soon';
+          statusClass = 'warning';
+          statusLabel = 'Expiring soon';
+        } else {
+          tokenStatusClass = 'success';
+          tokenStatusLabel = 'Active';
+          statusClass = 'success';
+          statusLabel = 'Connected';
+        }
+      } else {
+        tokenStatusClass = 'error';
+        tokenStatusLabel = 'Unknown';
+        statusClass = 'error';
+        statusLabel = 'No token';
+      }
+    } else {
+      statusClass = 'error';
+      statusLabel = 'Disconnected';
+    }
+
+    const statusIcon = statusClass === 'success'
       ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
-      : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+      : statusClass === 'warning'
+        ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-warning)" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+        : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
 
     popover = document.createElement('div');
     popover.className = 'graph-popover';
@@ -1357,15 +1400,15 @@ class DashboardClient {
       <div class="stat-grid">
         <div class="stat-card">
           <div class="stat-card__label">Token</div>
-          <div class="stat-card__value">${isConnected ? 'Active' : '--'}</div>
+          <div class="stat-card__value stat-card__value--${tokenStatusClass}">${tokenStatusLabel}</div>
         </div>
         <div class="stat-card">
           <div class="stat-card__label">Tenant</div>
-          <div class="stat-card__value">${s.graphTenantId || '--'}</div>
+          <div class="stat-card__value">${this._escapeHtml(s.graphTenantId || '--')}</div>
         </div>
         <div class="stat-card">
           <div class="stat-card__label">Provider</div>
-          <div class="stat-card__value">${s.emailProvider || 'auto'}</div>
+          <div class="stat-card__value">${this._escapeHtml(s.emailProvider || 'auto')}</div>
         </div>
       </div>
     `;
@@ -2135,9 +2178,14 @@ class DashboardClient {
         if (data.success && data.draft) {
           item.draft = data.draft;
           this.renderReaderPane(item);
+        } else {
+          this.showToast('error', 'Draft generation failed — retrying with fallback');
         }
       })
-      .catch((err) => console.error('Failed to generate draft:', err));
+      .catch((err) => {
+        console.error('Failed to generate draft:', err);
+        this.showToast('error', 'Draft generation failed — retrying with fallback');
+      });
   }
 
   _handleReaderArchive(itemId) {
@@ -2152,6 +2200,7 @@ class DashboardClient {
           this.selectedEmailId = null;
           this.renderReaderPane(null);
           this.renderTriage();
+          this.showToast('success', 'Email archived');
         }
       })
       .catch((err) => alert('Archive failed: ' + err.message));
@@ -2170,6 +2219,7 @@ class DashboardClient {
           this.selectedEmailId = null;
           this.renderReaderPane(null);
           this.renderTriage();
+          this.showToast('success', 'Email deleted');
         }
       })
       .catch((err) => alert('Delete failed: ' + err.message));
@@ -2265,6 +2315,7 @@ class DashboardClient {
           if (data.success) {
             delete item.draft;
             this.renderReaderPane(item);
+            this.showToast('success', 'Draft sent successfully');
           } else {
             alert('Send failed: ' + (data.error || 'Unknown error'));
             btn.textContent = 'Send Draft';
@@ -2305,9 +2356,14 @@ class DashboardClient {
         if (data.success && data.draft) {
           item.draft = data.draft;
           this.renderReaderPane(item);
+        } else {
+          this.showToast('error', 'Draft generation failed — retrying with fallback');
         }
       })
-      .catch((err) => console.error('Failed to regenerate draft:', err));
+      .catch((err) => {
+        console.error('Failed to regenerate draft:', err);
+        this.showToast('error', 'Draft generation failed — retrying with fallback');
+      });
   }
 
   // ── Move to folder ──────────────────────────────────────────────────────
@@ -2373,6 +2429,7 @@ class DashboardClient {
   }
 
   _moveEmailToFolder(emailId, folderId, item) {
+    const folderName = (this.folderCache && this.folderCache.find((f) => f.id === folderId)?.displayName) || folderId;
     fetch(`/api/emails/${encodeURIComponent(emailId)}/move`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2385,6 +2442,7 @@ class DashboardClient {
           this.selectedEmailId = null;
           this.renderReaderPane(null);
           this.renderTriage();
+          this.showToast('success', 'Email moved to ' + folderName);
         } else {
           alert('Move failed: ' + (data.error || 'Unknown error'));
         }
@@ -2659,6 +2717,85 @@ class DashboardClient {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
   }
+
+  showToast(type, message, action) {
+    const toastArea = document.getElementById('toastArea');
+    if (!toastArea) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast toast--' + type;
+
+    let html = '';
+    if (type === 'warning') {
+      html += '<span class="status-dot status-dot--warning"></span>';
+    } else if (type === 'error') {
+      html += '<span class="status-dot status-dot--error"></span>';
+    } else if (type === 'success') {
+      html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>';
+    }
+
+    html += '<span style="flex: 1;">' + this.escapeHtml(message) + '</span>';
+
+    if (action) {
+      html += '<button class="btn btn--primary-ai btn--sm toast-action">' + this.escapeHtml(action.text) + '</button>';
+    }
+
+    toast.innerHTML = html;
+
+    if (action && action.onClick) {
+      const btn = toast.querySelector('.toast-action');
+      if (btn) btn.addEventListener('click', action.onClick);
+    }
+
+    // Auto-dismiss after 5 seconds
+    const dismiss = () => { if (toast.parentNode) toast.remove(); };
+    setTimeout(dismiss, 5000);
+
+    // Click toast to dismiss
+    toast.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('toast-action')) dismiss();
+    });
+
+    toastArea.appendChild(toast);
+  }
+
+  checkGraphTokenExpiry() {
+    // Check if we have token expiry info from settings or connection state
+    const dot = document.getElementById('graphStatusDot');
+    if (!dot) return;
+
+    // Read token info from _settingsData or _graphConnectionState
+    const tokenExpiry = this._graphTokenExpiry; // timestamp when token expires
+
+    if (!tokenExpiry) {
+      dot.className = 'status-dot status-dot--error';
+      return;
+    }
+
+    const now = Date.now();
+    const remainingMs = tokenExpiry - now;
+    const fifteenMin = 15 * 60 * 1000;
+
+    if (remainingMs <= 0) {
+      dot.className = 'status-dot status-dot--error';
+      this.showToast('error', 'Graph connection expired', {
+        text: 'Reconnect',
+        onClick: () => this.startGraphAuth()
+      });
+    } else if (remainingMs <= fifteenMin) {
+      dot.className = 'status-dot status-dot--warning';
+      if (!this._graphExpiryWarningShown) {
+        this._graphExpiryWarningShown = true;
+        this.showToast('warning', 'Graph connection expiring — click to reconnect', {
+          text: 'Reconnect',
+          onClick: () => this.startGraphAuth()
+        });
+      }
+    } else {
+      dot.className = 'status-dot status-dot--success';
+      this._graphExpiryWarningShown = false;
+    }
+  }
 }
 
 function formatAiProviderLabel(item) {
@@ -2790,11 +2927,19 @@ function isMobileReaderViewport() {
   return window.innerWidth <= 767;
 }
 
-// setSidebarOpen / closeSidebarOnCompactViewport retained as stubs —
-// the old 240px sidebar is replaced by the icon rail (no open/close state needed).
-function setSidebarOpen(_isOpen) { /* no-op: icon rail has no open/close state */ }
+// setSidebarOpen / closeSidebarOnCompactViewport retained for compatibility.
+// setSidebarOpen manages sidebar-open body class and sidebarToggleBtn aria-expanded.
+function setSidebarOpen(isOpen) {
+  document.body.classList.toggle('sidebar-open', isOpen);
+  const toggle = document.getElementById('sidebarToggleBtn');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
 
-function closeSidebarOnCompactViewport() { /* no-op: icon rail always visible */ }
+function closeSidebarOnCompactViewport() {
+  document.body.classList.remove('drawer-open');
+}
 
 function toggleFilterValue(currentValue, nextValue) {
   const next = nextValue || null;
@@ -2969,6 +3114,22 @@ document.addEventListener('DOMContentLoaded', () => {
   if (triageBtn) {
     triageBtn.addEventListener('click', () => {
       dashboard.refreshTriage();
+    });
+  }
+
+  // ── Drawer toggle ──────────────────────────────────────────────────────────
+  const drawerToggle = document.getElementById('drawerToggle');
+  const drawerOverlay = document.getElementById('drawerOverlay');
+
+  if (drawerToggle) {
+    drawerToggle.addEventListener('click', () => {
+      document.body.classList.toggle('drawer-open');
+    });
+  }
+
+  if (drawerOverlay) {
+    drawerOverlay.addEventListener('click', () => {
+      document.body.classList.remove('drawer-open');
     });
   }
 
