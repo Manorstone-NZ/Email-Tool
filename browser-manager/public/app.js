@@ -238,109 +238,224 @@ class DashboardClient {
   }
 
   // ── Logs rendering and filtering ──────────────────────────────────────────
-  renderLogs() {
-    const tableBody = document.getElementById('logsTableBody');
-    const emptyState = document.getElementById('logsEmptyState');
-    const resultCount = document.getElementById('logsResultCount');
-
-    if (!tableBody) return;
-
-    // Build filter object for LogHelpers
-    const filters = {
-      search: this.logsFilterSearch,
-      type: this.logsFilterType === 'all' ? null : this.logsFilterType,
-      window: this.logsFilterWindow,
+  computeLogSummary() {
+    const today = new Date().toDateString();
+    const todayLogs = this.logs.filter(l => new Date(l.timestamp).toDateString() === today);
+    return {
+      total: todayLogs.length,
+      errors: todayLogs.filter(l => /error|fail/i.test(l.action || l.type || '')).length,
+      drafts: todayLogs.filter(l => /draft/i.test(l.action || '')).length,
+      sent: todayLogs.filter(l => /send|sent/i.test(l.action || '')).length,
     };
+  }
 
-    // Use LogHelpers.filterLogs if available
-    const filteredLogs = typeof LogHelpers !== 'undefined' && LogHelpers.filterLogs
-      ? LogHelpers.filterLogs(this.logs, filters, new Date())
+  renderLogs() {
+    this._renderLogsSummary();
+    this._renderLogsFilters();
+    this._renderLogsEntries();
+    this._updateLogsLiveLabel();
+  }
+
+  _updateLogsLiveLabel() {
+    const label = document.getElementById('logsLiveLabel');
+    if (!label) return;
+    label.textContent = 'Live';
+    label.className = `logs-live-label ${this.logsIsLive ? 'logs-live-label--on' : 'logs-live-label--off'}`;
+  }
+
+  _renderLogsSummary() {
+    const container = document.getElementById('logsSummary');
+    if (!container) return;
+    const s = this.computeLogSummary();
+    const stats = [
+      { count: s.total, label: 'Actions today', countClass: 'neutral', filterKey: 'all' },
+      { count: s.errors, label: 'Errors', countClass: 'error', filterKey: 'errors' },
+      { count: s.drafts, label: 'Drafts generated', countClass: 'draft', filterKey: 'drafts' },
+      { count: s.sent, label: 'Sent', countClass: 'success', filterKey: 'sent' },
+    ];
+    container.innerHTML = stats.map(stat => {
+      const isActive = this.logsFilterType === stat.filterKey;
+      return `<div class="logs-stat${isActive ? ' is-active' : ''}" data-filter="${this.escapeHtml(stat.filterKey)}">
+        <span class="logs-stat__count logs-stat__count--${stat.countClass}">${stat.count}</span>
+        <span class="logs-stat__label">${this.escapeHtml(stat.label)}</span>
+      </div>`;
+    }).join('');
+    container.querySelectorAll('.logs-stat').forEach(el => {
+      el.addEventListener('click', () => {
+        this.logsFilterType = el.dataset.filter;
+        this.renderLogs();
+      });
+    });
+  }
+
+  _renderLogsFilters() {
+    const container = document.getElementById('logsFilters');
+    if (!container) return;
+    const pills = [
+      { label: 'All', key: 'all' },
+      { label: 'Errors', key: 'errors' },
+      { label: 'Drafts', key: 'drafts' },
+      { label: 'Categorization', key: 'categorization' },
+      { label: 'Actions', key: 'actions' },
+    ];
+    const pillsHtml = pills.map(p => {
+      const isActive = this.logsFilterType === p.key;
+      return `<button type="button" class="pill${isActive ? ' is-active' : ''}" data-filter="${this.escapeHtml(p.key)}">${this.escapeHtml(p.label)}</button>`;
+    }).join('');
+    container.innerHTML = `${pillsHtml}
+      <div class="logs-search-wrap">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-width="1.5">
+          <circle cx="7" cy="7" r="5"/><path d="m11 11 3 3"/>
+        </svg>
+        <input type="search" id="logsSearchInput" class="logs-search-input" placeholder="Search…" value="${this.escapeHtml(this.logsFilterSearch || '')}">
+      </div>`;
+    container.querySelectorAll('.pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.logsFilterType = btn.dataset.filter;
+        this.renderLogs();
+      });
+    });
+    const searchInput = container.querySelector('#logsSearchInput');
+    if (searchInput) {
+      searchInput.addEventListener('input', e => {
+        this.logsFilterSearch = e.target.value;
+        this._renderLogsEntries();
+      });
+    }
+  }
+
+  _getLogEntryType(log) {
+    const action = (log.action || '').toLowerCase();
+    const type = (log.type || '').toLowerCase();
+    if (/error|fail/i.test(action) || /error|fail/i.test(type)) return 'error';
+    if (/draft/i.test(action)) return 'draft';
+    if (/send|sent/i.test(action)) return 'success';
+    if (/categori|triage|classify/i.test(action) || type === 'categorization') return 'categorization';
+    return 'action';
+  }
+
+  _getLogIconSvg(entryType) {
+    const icons = {
+      error: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#c0564a" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3M8 10.5v.5"/></svg>`,
+      draft: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#d4a574" stroke-width="1.5"><path d="M3 12l7-7 2 2-7 7H3v-2z"/></svg>`,
+      success: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#5a9a6a" stroke-width="1.5"><path d="M3 8l3.5 3.5L13 5"/></svg>`,
+      categorization: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4a6380" stroke-width="1.5"><rect x="3" y="3" width="4" height="4" rx="1"/><rect x="9" y="3" width="4" height="4" rx="1"/><rect x="3" y="9" width="4" height="4" rx="1"/><rect x="9" y="9" width="4" height="4" rx="1"/></svg>`,
+      action: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#777" stroke-width="1.5"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
+    };
+    return icons[entryType] || icons.action;
+  }
+
+  _getLogStatusBadge(entryType) {
+    const map = {
+      error: `<span class="pill pill--sm" style="background:var(--cat-needs-reply-bg);color:var(--status-error);border-color:var(--cat-needs-reply-border);">Error</span>`,
+      draft: `<span class="pill pill--sm" style="background:var(--bg-surface-warm);color:var(--accent-ai);">Draft</span>`,
+      success: `<span class="pill pill--sm" style="background:#f0faf3;color:var(--status-success);">Sent</span>`,
+      categorization: `<span class="pill pill--sm" style="background:var(--cat-fyi-bg);color:var(--cat-fyi-fg);">Categorized</span>`,
+      action: `<span class="pill pill--sm" style="background:var(--bg-rail);color:var(--text-muted);">Action</span>`,
+    };
+    return map[entryType] || map.action;
+  }
+
+  _logsRelativeTime(timestamp) {
+    const now = Date.now();
+    const ts = new Date(timestamp || now).getTime();
+    const diffMs = now - ts;
+    if (diffMs < 0) return 'just now';
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  _filterLogsByType(logs, filterType) {
+    if (!filterType || filterType === 'all') return logs;
+    return logs.filter(log => {
+      const entryType = this._getLogEntryType(log);
+      if (filterType === 'errors') return entryType === 'error';
+      if (filterType === 'drafts') return entryType === 'draft';
+      if (filterType === 'sent') return entryType === 'success';
+      if (filterType === 'categorization') return entryType === 'categorization';
+      if (filterType === 'actions') return entryType === 'action';
+      return true;
+    });
+  }
+
+  _renderLogsEntries() {
+    const container = document.getElementById('logsEntries');
+    if (!container) return;
+
+    // Apply search filter via LogHelpers
+    const searchFilters = {
+      search: this.logsFilterSearch,
+      type: null,
+      window: 'all',
+    };
+    const searchFiltered = typeof LogHelpers !== 'undefined' && LogHelpers.filterLogs
+      ? LogHelpers.filterLogs(this.logs, searchFilters, new Date())
       : this.logs;
 
+    // Apply type filter
+    const typeFiltered = this._filterLogsByType(searchFiltered, this.logsFilterType);
+
     // Sort newest first
-    const sortedLogs = filteredLogs.slice().sort((a, b) => {
+    const sortedLogs = typeFiltered.slice().sort((a, b) => {
       const timeA = new Date(a.timestamp || 0).getTime();
       const timeB = new Date(b.timestamp || 0).getTime();
       return timeB - timeA;
     });
 
-    // Update result count
-    if (resultCount) {
-      resultCount.textContent = `${sortedLogs.length} result${sortedLogs.length !== 1 ? 's' : ''}`;
-    }
-
-    // Clear table
-    tableBody.innerHTML = '';
-
-    // Show/hide empty state
     if (sortedLogs.length === 0) {
-      if (emptyState) {
-        emptyState.hidden = false;
-        if (this.logsFilterSearch || this.logsFilterType !== 'all' || this.logsFilterWindow !== '15m') {
-          emptyState.textContent = 'No results match current filters.';
-        } else {
-          emptyState.textContent = 'No logs found.';
-        }
-      }
+      const hasFilter = this.logsFilterSearch || (this.logsFilterType && this.logsFilterType !== 'all');
+      container.innerHTML = `<div class="logs-empty">${hasFilter ? 'No results match current filters.' : 'No logs found.'}</div>`;
       return;
     }
 
-    if (emptyState) {
-      emptyState.hidden = true;
-    }
+    container.innerHTML = '';
 
-    // Render rows
     sortedLogs.forEach((log, index) => {
-      // Use index-based ID to ensure consistency across re-renders
       const logId = `log-${index}`;
       const isExpanded = this.logsExpandedRowId === logId;
+      const entryType = this._getLogEntryType(log);
+      const isError = entryType === 'error';
 
-      // Main row
-      const row = document.createElement('tr');
-      row.className = `logs-table-row ${isExpanded ? 'is-expanded' : ''}`;
-      row.dataset.logId = logId;
+      const action = this.escapeHtml(log.action || 'Unknown action');
+      const subject = this.escapeHtml(log.details?.subject || log.summary || '');
+      const contextLine = this.escapeHtml(log.summary || (log.details ? JSON.stringify(log.details).slice(0, 80) : ''));
+      const relTime = this._logsRelativeTime(log.timestamp);
 
-      const timestamp = new Date(log.timestamp || new Date()).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-
-      const dateStr = new Date(log.timestamp || new Date()).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-      });
-
-      const typeBadge = `<span class="logs-table-type-badge ${log.type}">${log.type || 'unknown'}</span>`;
-      const action = this.escapeHtml(log.action || 'N/A');
-      const summary = this.escapeHtml((log.summary || log.details?.subject || ''));
-      const truncatedSummary = summary.length > 60 ? summary.substring(0, 57) + '...' : summary;
-
-      row.innerHTML = `
-        <td class="logs-col-timestamp">${dateStr} ${timestamp}</td>
-        <td class="logs-col-type">${typeBadge}</td>
-        <td class="logs-col-action">${action}</td>
-        <td class="logs-col-summary">${truncatedSummary}</td>
+      // Entry row
+      const entryEl = document.createElement('div');
+      entryEl.className = `log-entry${isError ? ' log-entry--error' : ''}`;
+      entryEl.dataset.logId = logId;
+      entryEl.innerHTML = `
+        <div class="log-entry__icon log-entry__icon--${entryType}">
+          ${this._getLogIconSvg(entryType)}
+        </div>
+        <div class="log-entry__content">
+          <div class="log-entry__line1">
+            <span class="log-entry__action${isError ? ' log-entry__action--error' : ''}">${action}</span>
+            ${subject ? `<span class="log-entry__separator">—</span><span class="log-entry__subject">${subject}</span>` : ''}
+          </div>
+          ${contextLine ? `<div class="log-entry__line2">${contextLine}</div>` : ''}
+        </div>
+        <div class="log-entry__right">
+          ${this._getLogStatusBadge(entryType)}
+          <span class="log-entry__time">${relTime}</span>
+        </div>
       `;
+      entryEl.addEventListener('click', () => this.handleLogsRowExpand(logId));
+      container.appendChild(entryEl);
 
-      row.addEventListener('click', () => {
-        this.handleLogsRowExpand(logId);
-      });
-
-      tableBody.appendChild(row);
-
-      // Details row (hidden by default)
+      // Expanded accordion detail
       if (isExpanded) {
-        const detailsRow = document.createElement('tr');
-        detailsRow.className = 'logs-table-details-row';
-        detailsRow.dataset.logId = logId;
-        const detailsJson = this.escapeHtml(JSON.stringify(log, null, 2));
-        detailsRow.innerHTML = `
-          <td colspan="4">
-            <div class="logs-details-content">${detailsJson}</div>
-          </td>
-        `;
-        tableBody.appendChild(detailsRow);
+        const detailEl = document.createElement('div');
+        detailEl.className = 'log-entry-detail';
+        detailEl.dataset.logId = logId;
+        detailEl.innerHTML = `<pre class="log-entry-detail__code">${this.escapeHtml(JSON.stringify(log, null, 2))}</pre>`;
+        container.appendChild(detailEl);
       }
     });
   }
@@ -355,17 +470,12 @@ class DashboardClient {
     } else {
       this.logsExpandedRowId = logId;
     }
-    this.renderLogs();
+    this._renderLogsEntries();
   }
 
   async handleLogsLiveToggle(isLive) {
     this.logsIsLive = isLive;
-
-    // Update badge visibility
-    const badge = document.getElementById('logsLivePausedBadge');
-    if (badge) {
-      badge.hidden = isLive;
-    }
+    this._updateLogsLiveLabel();
 
     // If toggling ON, show refresh indicator and fetch fresh logs
     if (isLive) {
@@ -2916,56 +3026,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load current settings
   dashboard.loadSettings();
 
-  // ── Logs filter handlers ──────────────────────────────────────────────────
-  const logsSearchInput = document.getElementById('logsSearchInput');
-  if (logsSearchInput) {
-    logsSearchInput.addEventListener('input', (e) => {
-      dashboard.logsFilterSearch = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsTypeSelect = document.getElementById('logsTypeSelect');
-  if (logsTypeSelect) {
-    logsTypeSelect.addEventListener('change', (e) => {
-      dashboard.logsFilterType = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsWindowSelect = document.getElementById('logsWindowSelect');
-  if (logsWindowSelect) {
-    logsWindowSelect.addEventListener('change', (e) => {
-      dashboard.logsFilterWindow = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsClearFiltersBtn = document.getElementById('logsClearFiltersBtn');
-  if (logsClearFiltersBtn) {
-    logsClearFiltersBtn.addEventListener('click', () => {
-      dashboard.logsFilterSearch = '';
-      dashboard.logsFilterType = 'all';
-      dashboard.logsFilterWindow = '15m';
-      dashboard.logsExpandedRowId = null;
-      if (logsSearchInput) logsSearchInput.value = '';
-      if (logsTypeSelect) logsTypeSelect.value = 'all';
-      if (logsWindowSelect) logsWindowSelect.value = '15m';
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
+  // ── Logs live toggle handler ───────────────────────────────────────────────
+  // Filter pills, search input, and stat cards are wired dynamically in renderLogs().
   const logsLiveToggle = document.getElementById('logsLiveToggle');
   if (logsLiveToggle) {
     logsLiveToggle.checked = dashboard.logsIsLive;
     logsLiveToggle.addEventListener('change', (e) => {
       dashboard.handleLogsLiveToggle(e.target.checked);
     });
-  }
-
-  const logsLivePausedBadge = document.getElementById('logsLivePausedBadge');
-  if (logsLivePausedBadge) {
-    logsLivePausedBadge.hidden = dashboard.logsIsLive;
   }
 
   // ── Route controller ──────────────────────────────────────────────────────

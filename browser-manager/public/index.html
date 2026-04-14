@@ -54,55 +54,21 @@
             <section id="readerPane" class="reader-pane" data-region="reader-pane" aria-label="Email reader pane"></section>
         </section>
 
-        <section id="view-logs" data-view="logs" hidden>
+        <section id="view-logs" class="logs-view" data-view="logs" hidden>
             <div class="logs-header">
-                <h2>Logs</h2>
-                <div class="logs-header-controls">
-                    <span id="logsResultCount" class="logs-result-count"></span>
-                    <div class="logs-live-toggle">
-                        <label class="live-toggle-label">
-                            <input type="checkbox" id="logsLiveToggle" class="live-toggle-input">
-                            <span class="live-toggle-text">Live</span>
-                        </label>
-                        <span id="logsLivePausedBadge" class="logs-live-badge" hidden>Live updates paused</span>
-                    </div>
+                <h2 class="view-title" style="margin-bottom: 0;">Logs</h2>
+                <div class="logs-header__right">
+                    <label class="toggle">
+                        <input type="checkbox" id="logsLiveToggle">
+                        <span class="toggle-track"></span>
+                        <span class="toggle-knob"></span>
+                    </label>
+                    <span class="logs-live-label" id="logsLiveLabel">Live</span>
                 </div>
             </div>
-
-            <div class="logs-filter-bar">
-                <input type="search" id="logsSearchInput" placeholder="Search logs..." class="logs-search-input">
-                <select id="logsTypeSelect" class="logs-filter-select">
-                    <option value="all">All Types</option>
-                    <option value="automation">Automation</option>
-                    <option value="user">User</option>
-                </select>
-                <select id="logsWindowSelect" class="logs-filter-select">
-                    <option value="15m">Last 15 minutes</option>
-                    <option value="1h">Last 1 hour</option>
-                    <option value="24h">Last 24 hours</option>
-                    <option value="all">All time</option>
-                </select>
-                <button type="button" id="logsClearFiltersBtn" class="btn btn-secondary">Clear Filters</button>
-            </div>
-
-            <div class="logs-table-container">
-                <table class="logs-table">
-                    <thead>
-                        <tr>
-                            <th class="logs-col-timestamp">Timestamp</th>
-                            <th class="logs-col-type">Type</th>
-                            <th class="logs-col-action">Action</th>
-                            <th class="logs-col-summary">Summary</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logsTableBody">
-                    </tbody>
-                </table>
-                <div id="logsEmptyState" class="empty-state" hidden>No logs found.</div>
-                <div id="logsRefreshIndicator" class="logs-refresh-indicator" hidden>
-                    <span class="spinner"></span> Refreshing...
-                </div>
-            </div>
+            <div class="logs-summary" id="logsSummary"></div>
+            <div class="logs-filters" id="logsFilters"></div>
+            <div class="logs-entries" id="logsEntries"></div>
         </section>
 
         <section id="view-settings" data-view="settings" hidden>
