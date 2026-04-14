@@ -11,7 +11,8 @@ class DashboardClient {
       search: '',
       category: null,  // null means 'All', or one of 'Needs Reply', 'Waiting on Others', 'FYI'
       state: null,     // null means 'All', or one of 'Flagged', 'Pinned', 'Done'
-      tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
+      tag: null,       // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
+      tags: []         // array of selected tags from tag popover
     };
     this.selectedEmailId = null;
     this.mobileReaderOpen = false;
@@ -654,8 +655,8 @@ class DashboardClient {
       EmailHelpers.warnIfLargeEmailList(filtered);
     }
 
-    // Compute counts for left rail (after search, before active filter narrowing)
-    this.updateRailCounts(merged);
+    // Compute counts for filter pills (after search, before active filter narrowing)
+    this.updateFilterCounts(merged);
     
     this.renderEmailCards(filtered);
     this.updateFilterActiveStates();
@@ -672,81 +673,198 @@ class DashboardClient {
     }
   }
 
-  updateRailCounts(items) {
+  updateFilterCounts(items) {
     if (typeof EmailHelpers === 'undefined' || !EmailHelpers.countEmailBuckets) {
       return;
     }
 
     const counts = EmailHelpers.countEmailBuckets(items, { search: this.emailFilters.search });
-    const countMap = {
-      'count-cat-needs-reply': counts.categories['Needs Reply'] || 0,
-      'count-cat-waiting': counts.categories['Waiting on Others'] || 0,
-      'count-cat-fyi': counts.categories.FYI || 0,
-      'count-state-flagged': counts.states.Flagged || 0,
-      'count-state-pinned': counts.states.Pinned || 0,
-      'count-state-done': counts.states.Done || 0,
-    };
+    this._lastTagCounts = counts.tags || {};
 
-    Object.entries(countMap).forEach(([id, value]) => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.textContent = value > 0 ? `(${value})` : '';
-      }
-    });
+    // ── Category pills ──────────────────────────────────────────────────────
+    const categoryPillsEl = document.getElementById('categoryPills');
+    if (categoryPillsEl) {
+      categoryPillsEl.textContent = '';
 
-    this.renderTagRail(counts.tags || {});
+      const allCount = Object.values(counts.categories).reduce((s, n) => s + n, 0);
+      const allPill = document.createElement('button');
+      allPill.type = 'button';
+      allPill.className = 'pill' + (!this.emailFilters.category ? ' is-active' : '');
+      allPill.dataset.category = '';
+      allPill.textContent = 'All ';
+      const allSpan = document.createElement('span');
+      allSpan.className = 'pill-count';
+      allSpan.textContent = String(allCount);
+      allPill.appendChild(allSpan);
+      categoryPillsEl.appendChild(allPill);
+
+      const categoryVariants = {
+        'Needs Reply': 'needs-reply',
+        'Waiting on Others': 'waiting',
+        'FYI': 'fyi',
+      };
+
+      ['Needs Reply', 'Waiting on Others', 'FYI'].forEach((cat) => {
+        const count = counts.categories[cat] || 0;
+        const variant = categoryVariants[cat] || '';
+        const isActive = this.emailFilters.category === cat;
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'pill' + (isActive ? ' is-active pill--' + variant : '');
+        pill.dataset.category = cat;
+        pill.textContent = cat + ' ';
+        const countSpan = document.createElement('span');
+        countSpan.className = 'pill-count';
+        countSpan.textContent = String(count);
+        pill.appendChild(countSpan);
+        categoryPillsEl.appendChild(pill);
+      });
+
+      // Attach click handlers to category pills
+      categoryPillsEl.querySelectorAll('[data-category]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.emailFilters.category = btn.dataset.category || null;
+          this.renderTriage();
+        });
+      });
+    }
+
+    // ── State pills ─────────────────────────────────────────────────────────
+    const statePillsEl = document.getElementById('statePills');
+    if (statePillsEl) {
+      statePillsEl.textContent = '';
+
+      ['Flagged', 'Pinned', 'Done'].forEach((state) => {
+        const isActive = this.emailFilters.state === state;
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'pill pill--sm pill--ghost' + (isActive ? ' is-active' : '');
+        pill.dataset.state = state;
+        pill.textContent = state;
+        statePillsEl.appendChild(pill);
+      });
+
+      // Tag overflow pill
+      const selectedTagCount = this.emailFilters.tags.length;
+      const tagOverflow = document.createElement('span');
+      tagOverflow.className = 'pill pill--sm pill--ghost';
+      tagOverflow.id = 'tagOverflowPill';
+      tagOverflow.hidden = selectedTagCount === 0;
+      tagOverflow.textContent = '+' + selectedTagCount + ' tag' + (selectedTagCount !== 1 ? 's' : '');
+      statePillsEl.appendChild(tagOverflow);
+
+      // Tag filter button
+      const tagBtn = document.createElement('button');
+      tagBtn.type = 'button';
+      tagBtn.className = 'btn btn--icon btn--ghost';
+      tagBtn.id = 'tagFilterBtn';
+      tagBtn.setAttribute('aria-label', 'Filter by tags');
+      tagBtn.style.marginLeft = 'auto';
+      tagBtn.style.position = 'relative';
+      const tagSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      tagSvg.setAttribute('width', '14');
+      tagSvg.setAttribute('height', '14');
+      tagSvg.setAttribute('viewBox', '0 0 24 24');
+      tagSvg.setAttribute('fill', 'none');
+      tagSvg.setAttribute('stroke', 'currentColor');
+      tagSvg.setAttribute('stroke-width', '2');
+      tagSvg.setAttribute('stroke-linecap', 'round');
+      const tagPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      tagPoly.setAttribute('points', '22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3');
+      tagSvg.appendChild(tagPoly);
+      tagBtn.appendChild(tagSvg);
+      statePillsEl.appendChild(tagBtn);
+
+      // Attach click handlers to state pills
+      statePillsEl.querySelectorAll('[data-state]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.emailFilters.state = this.emailFilters.state === btn.dataset.state ? null : btn.dataset.state;
+          this.renderTriage();
+        });
+      });
+
+      // Attach tag filter popover toggle
+      tagBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleTagPopover(tagBtn);
+      });
+    }
   }
 
-  renderTagRail(tagCounts) {
-    const tagList = document.getElementById('tagList');
-    if (!tagList) {
+  toggleTagPopover(anchorBtn) {
+    let popover = document.querySelector('.tag-popover');
+    if (popover) {
+      popover.remove();
       return;
     }
 
-    const entries = Object.entries(tagCounts || {})
+    const tagCounts = this._lastTagCounts || {};
+    const entries = Object.entries(tagCounts)
       .filter(([, count]) => Number(count) > 0)
-      .sort((a, b) => {
-        if (b[1] !== a[1]) {
-          return b[1] - a[1];
+      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+
+    popover = document.createElement('div');
+    popover.className = 'tag-popover';
+
+    const title = document.createElement('div');
+    title.className = 'tag-popover__title';
+    title.textContent = 'Filter by tags';
+    popover.appendChild(title);
+
+    const tagsWrap = document.createElement('div');
+    tagsWrap.className = 'tag-popover__tags';
+
+    entries.forEach(([tag]) => {
+      const isSelected = this.emailFilters.tags.includes(tag);
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'pill pill--sm pill--ghost' + (isSelected ? ' is-active' : '');
+      pill.dataset.popoverTag = tag;
+      pill.textContent = tag;
+      pill.addEventListener('click', () => {
+        const idx = this.emailFilters.tags.indexOf(tag);
+        if (idx >= 0) {
+          this.emailFilters.tags.splice(idx, 1);
+        } else {
+          this.emailFilters.tags.push(tag);
         }
-        return String(a[0]).localeCompare(String(b[0]));
+        this.renderTriage();
       });
-
-    tagList.innerHTML = '';
-
-    const allLi = document.createElement('li');
-    const allBtn = document.createElement('button');
-    allBtn.type = 'button';
-    allBtn.className = 'rail-filter';
-    allBtn.dataset.tag = '';
-    allBtn.textContent = 'All Tags';
-    allLi.appendChild(allBtn);
-    tagList.appendChild(allLi);
-
-    entries.forEach(([tag, count]) => {
-      const li = document.createElement('li');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'rail-filter';
-      btn.dataset.tag = String(tag);
-      btn.textContent = `${tag} (${count})`;
-      li.appendChild(btn);
-      tagList.appendChild(li);
+      tagsWrap.appendChild(pill);
     });
+
+    popover.appendChild(tagsWrap);
+
+    if (this.emailFilters.tags.length > 0) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'tag-popover__clear';
+      clearBtn.textContent = 'Clear all';
+      clearBtn.addEventListener('click', () => {
+        this.emailFilters.tags = [];
+        this.renderTriage();
+      });
+      popover.appendChild(clearBtn);
+    }
+
+    // Position relative to anchorBtn
+    anchorBtn.style.position = 'relative';
+    anchorBtn.appendChild(popover);
+
+    // Close popover when clicking outside
+    const closeHandler = (e) => {
+      if (!popover.contains(e.target) && e.target !== anchorBtn && !anchorBtn.contains(e.target)) {
+        popover.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
   updateFilterActiveStates() {
-    document.querySelectorAll('[data-category]').forEach((btn) => {
-      btn.classList.toggle('is-active', (btn.dataset.category || null) === this.emailFilters.category);
-    });
-
-    document.querySelectorAll('[data-state]').forEach((btn) => {
-      btn.classList.toggle('is-active', (btn.dataset.state || null) === this.emailFilters.state);
-    });
-
-    document.querySelectorAll('[data-tag]').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.tag === this.emailFilters.tag);
-    });
+    // Category and state pills are now fully re-rendered in updateFilterCounts(),
+    // so active states are applied there. This method is kept as a no-op for
+    // backward compatibility with any code that still calls it.
   }
 
   renderEmailCards(items) {
@@ -757,7 +875,7 @@ class DashboardClient {
     const safeItems = Array.isArray(items) ? items : [];
     this.selectedEmailId = resolveSelectedEmailId(this.selectedEmailId, safeItems);
 
-    listEl.innerHTML = '';
+    listEl.textContent = '';
 
     if (!safeItems.length) {
       this.mobileReaderOpen = false;
@@ -781,253 +899,215 @@ class DashboardClient {
     this.renderReaderPane(selectedItem);
     this.syncEmailWorkspaceState();
 
-    safeItems.forEach((item) => {
+    // Helper: check if an item belongs to the 'act-now' tier
+    const isActNow = (item) => {
+      return item.urgency === 'high' && (item.score || 0) >= 70;
+    };
+
+    // Helper: build a single compact email row element
+    const buildEmailRow = (item) => {
       const itemId = String(item && item.id ? item.id : '');
       const isSelected = Boolean(itemId) && itemId === this.selectedEmailId;
       const sender = String((item && item.sender) || 'Unknown sender');
       const subject = String((item && item.subject) || 'No subject');
-      const recommendedAction = String((item && item.recommendedAction) || 'Review');
-      const preview = String((item && item.preview) || (item && item.body) || 'No preview available.');
+      const preview = String((item && item.preview) || (item && item.body) || '');
       const category = String((item && item.primaryCategory) || 'FYI');
       const tags = Array.isArray(item && item.tags) ? item.tags : [];
       const visibleTags = tags.slice(0, 2);
       const overflowTagCount = Math.max(tags.length - visibleTags.length, 0);
-      const scoreText = String((item && item.scoreMeta && item.scoreMeta.confidenceText) || item.confidence || `${Math.round(Number(item && item.score ? item.score : 0))}%`);
+      const score = typeof item.score === 'number' ? item.score : 0;
       const timestampMeta = typeof EmailHelpers !== 'undefined' && EmailHelpers.resolveDisplayTimestamp
         ? EmailHelpers.resolveDisplayTimestamp(item)
         : { value: item && item.timestamp ? item.timestamp : item && item.ingestedAt };
       const isoTimestamp = String((timestampMeta && timestampMeta.value) || '');
-      const openUrl = item && item.openUrl;
-      const safeOpenUrl = openUrl && isSafeUrl(openUrl) ? openUrl : '';
-      const initial = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
-      const reasonText = Array.isArray(item && item.reasons) && item.reasons.length
-        ? item.reasons.join(' | ')
-        : String((item && item.reason) || 'No explicit reason provided.');
-      const matchedSignals = Array.isArray(item && item.matchedSignals)
-        ? item.matchedSignals
-        : (Array.isArray(item && item.signals) ? item.signals : []);
 
-      const cardEl = document.createElement('div');
-      cardEl.className = 'email-card';
-      cardEl.dataset.id = itemId;
-      cardEl.dataset.selected = isSelected ? 'true' : 'false';
-      cardEl.dataset.expanded = 'false';
+      // Derive colors from helpers
+      const senderInitials = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
+      const avColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.avatarColor
+        ? EmailHelpers.avatarColor(sender)
+        : { bg: '#e8d5c4', fg: '#8b6a4f' };
+      const heatColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.scoreToHeatColor
+        ? EmailHelpers.scoreToHeatColor(score)
+        : '#e0dbd4';
+      const catColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor
+        ? EmailHelpers.getCategoryColor(category)
+        : { fg: '#777', bg: '#f5f3f0' };
 
-      const collapsedEl = document.createElement('div');
-      collapsedEl.className = 'card-collapsed';
+      const actNow = isActNow(item);
 
+      // ── Row container ─────────────────────────────────────────────────────
+      const rowEl = document.createElement('div');
+      rowEl.className = 'email-row' + (actNow ? ' is-act-now' : '') + (isSelected ? ' is-selected' : '');
+      rowEl.dataset.id = itemId;
+      rowEl.style.borderLeftColor = heatColor;
+
+      // ── Avatar ────────────────────────────────────────────────────────────
       const avatarEl = document.createElement('div');
-      avatarEl.className = 'card-avatar';
-      avatarEl.textContent = initial;
+      avatarEl.className = 'avatar avatar--md';
+      avatarEl.style.background = avColor.bg;
+      avatarEl.style.color = avColor.fg;
+      avatarEl.textContent = senderInitials;
 
+      // ── Content wrapper ───────────────────────────────────────────────────
       const contentEl = document.createElement('div');
-      contentEl.className = 'card-content';
+      contentEl.className = 'email-row__content';
 
-      const subjectRowEl = document.createElement('div');
-      subjectRowEl.className = 'card-subject-row';
-
-      const subjectEl = document.createElement('span');
-      subjectEl.className = 'card-subject';
-      subjectEl.textContent = subject;
-
-      const actionBadgeEl = document.createElement('span');
-      actionBadgeEl.className = 'card-action-badge';
-      actionBadgeEl.textContent = recommendedAction;
-
-      subjectRowEl.append(subjectEl, actionBadgeEl);
-
-      const metaRowEl = document.createElement('div');
-      metaRowEl.className = 'card-meta-row';
+      // ── Line 1 ────────────────────────────────────────────────────────────
+      const line1 = document.createElement('div');
+      line1.className = 'email-row__line1';
 
       const senderEl = document.createElement('span');
-      senderEl.className = 'card-sender';
+      senderEl.className = 'email-row__sender';
       senderEl.textContent = sender;
 
-      const timestampEl = document.createElement('span');
-      timestampEl.className = 'card-timestamp';
-      timestampEl.textContent = relativeTime(isoTimestamp);
-      timestampEl.title = isoTimestamp;
+      const badgeEl = document.createElement('span');
+      badgeEl.className = 'badge';
+      badgeEl.style.background = catColor.bg;
+      badgeEl.style.color = catColor.fg;
+      badgeEl.textContent = category;
 
-      const confidenceEl = document.createElement('span');
-      confidenceEl.className = 'card-confidence';
-      confidenceEl.textContent = scoreText;
-
-      metaRowEl.append(senderEl, timestampEl, confidenceEl);
-
-      const previewEl = document.createElement('div');
-      previewEl.className = 'card-preview';
-      previewEl.textContent = preview;
-
-      const pillsEl = document.createElement('div');
-      pillsEl.className = 'card-pills';
-
-      const categoryPillEl = document.createElement('span');
-      categoryPillEl.className = 'pill category-pill';
-      categoryPillEl.textContent = category;
-      pillsEl.appendChild(categoryPillEl);
-
+      const tagsEl = document.createElement('span');
+      tagsEl.className = 'email-row__tags';
       visibleTags.forEach((tag) => {
-        const tagPillEl = document.createElement('span');
-        tagPillEl.className = 'pill tag-pill';
-        tagPillEl.textContent = String(tag);
-        pillsEl.appendChild(tagPillEl);
+        const pill = document.createElement('span');
+        pill.className = 'pill pill--sm pill--ghost';
+        pill.textContent = String(tag);
+        tagsEl.appendChild(pill);
       });
-
       if (overflowTagCount > 0) {
-        const overflowPillEl = document.createElement('span');
-        overflowPillEl.className = 'pill tag-pill';
-        overflowPillEl.textContent = `+${overflowTagCount} more`;
-        pillsEl.appendChild(overflowPillEl);
+        const overflowPill = document.createElement('span');
+        overflowPill.className = 'pill pill--sm pill--ghost';
+        overflowPill.textContent = '+' + overflowTagCount;
+        tagsEl.appendChild(overflowPill);
       }
 
-      contentEl.append(subjectRowEl, metaRowEl, previewEl, pillsEl);
-      collapsedEl.append(avatarEl, contentEl);
+      line1.append(senderEl, badgeEl, tagsEl);
 
-      const actionsEl = document.createElement('div');
-      actionsEl.className = 'card-actions';
-
-      const openEl = document.createElement('a');
-      openEl.className = 'btn-card-action';
-      openEl.textContent = 'Open';
-      openEl.target = '_blank';
-      openEl.rel = 'noopener noreferrer';
-      openEl.href = safeOpenUrl || '#';
-      if (!safeOpenUrl) {
-        openEl.classList.add('is-disabled');
-        openEl.setAttribute('aria-disabled', 'true');
+      if (actNow) {
+        const actionLabel = document.createElement('span');
+        actionLabel.className = 'email-row__action-label';
+        actionLabel.textContent = 'Action required';
+        line1.appendChild(actionLabel);
       }
 
-      const pinEl = document.createElement('button');
-      pinEl.type = 'button';
-      pinEl.className = 'btn-card-action';
-      pinEl.dataset.action = 'pin';
-      pinEl.textContent = 'Pin';
-      if (item && item.uiState && item.uiState.pinned) {
-        pinEl.classList.add('is-active');
-      }
+      const scoreDot = document.createElement('span');
+      scoreDot.className = 'email-row__score-dot';
+      scoreDot.style.background = heatColor;
 
-      const doneEl = document.createElement('button');
-      doneEl.type = 'button';
-      doneEl.className = 'btn-card-action';
-      doneEl.dataset.action = 'done';
-      doneEl.textContent = 'Done';
+      const timeEl = document.createElement('span');
+      timeEl.className = 'email-row__time';
+      timeEl.textContent = relativeTime(isoTimestamp);
+      timeEl.title = isoTimestamp;
 
-      const draftEl = document.createElement('button');
-      draftEl.type = 'button';
-      draftEl.className = 'btn-card-action';
-      draftEl.dataset.action = 'draft';
-      draftEl.textContent = 'Draft Reply';
+      line1.append(scoreDot, timeEl);
 
-      const deleteEl = document.createElement('button');
-      deleteEl.type = 'button';
-      deleteEl.className = 'btn-card-action btn-card-action-danger';
-      deleteEl.dataset.action = 'delete';
-      deleteEl.textContent = '🗑 Delete';
+      // ── Line 2 ────────────────────────────────────────────────────────────
+      const line2 = document.createElement('div');
+      line2.className = 'email-row__line2';
 
-      const archiveEl = document.createElement('button');
-      archiveEl.type = 'button';
-      archiveEl.className = 'btn-card-action';
-      archiveEl.dataset.action = 'archive';
-      archiveEl.textContent = '📦 Archive';
+      const subjectEl = document.createElement('span');
+      subjectEl.className = 'email-row__subject';
+      subjectEl.textContent = subject;
 
-      actionsEl.append(openEl, pinEl, doneEl, draftEl, deleteEl, archiveEl);
+      const previewEl = document.createElement('span');
+      previewEl.className = 'email-row__preview';
+      previewEl.textContent = preview ? ' \u2014 ' + preview : '';
 
-      const expandedEl = document.createElement('div');
-      expandedEl.className = 'card-expanded';
-      expandedEl.hidden = true;
+      line2.append(subjectEl, previewEl);
 
-      const bodyPreviewEl = document.createElement('div');
-      bodyPreviewEl.className = 'card-body-preview';
-      bodyPreviewEl.textContent = String((item && item.body) || preview);
+      contentEl.append(line1, line2);
+      rowEl.append(avatarEl, contentEl);
 
-      const reasonEl = document.createElement('div');
-      reasonEl.className = 'card-reason';
-      const reasonLabelEl = document.createElement('strong');
-      reasonLabelEl.textContent = 'Reason:';
-      reasonEl.append(reasonLabelEl, document.createTextNode(` ${reasonText}`));
-
-      const aiMetaEl = document.createElement('div');
-      aiMetaEl.className = 'card-signals';
-      const aiMetaLabelEl = document.createElement('strong');
-      aiMetaLabelEl.textContent = 'AI:';
-      const aiMetaText = formatAiProviderLabel(item);
-      aiMetaEl.append(aiMetaLabelEl, document.createTextNode(` ${aiMetaText}`));
-
-      const categorySourceEl = document.createElement('div');
-      categorySourceEl.className = 'card-signals';
-      const categorySourceLabelEl = document.createElement('strong');
-      categorySourceLabelEl.textContent = 'Category Source:';
-      const categorySourceText = formatCategorySourceLabel(item);
-      categorySourceEl.append(categorySourceLabelEl, document.createTextNode(` ${categorySourceText}`));
-
-      const signalsEl = document.createElement('div');
-      signalsEl.className = 'card-signals';
-      const signalsLabelEl = document.createElement('strong');
-      signalsLabelEl.textContent = 'Matched signals:';
-      signalsEl.append(signalsLabelEl, document.createTextNode(` ${matchedSignals.length ? matchedSignals.join(', ') : 'None'}`));
-
-      const rawEl = document.createElement('details');
-      rawEl.className = 'card-raw';
-
-      const readerMetadataStrip = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
-
-      const rawSummaryEl = document.createElement('summary');
-      rawSummaryEl.textContent = 'Raw metadata';
-
-      const rawContentEl = document.createElement('pre');
-      rawContentEl.className = 'card-raw-content';
-      rawContentEl.textContent = JSON.stringify(item, null, 2);
-
-      rawEl.append(rawSummaryEl, rawContentEl);
-  expandedEl.append(readerMetadataStrip, bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
-
-      collapsedEl.addEventListener('click', () => {
+      // ── Click handler ─────────────────────────────────────────────────────
+      rowEl.addEventListener('click', () => {
         if (itemId) {
           this.selectedEmailId = itemId;
-          listEl.querySelectorAll('.email-card').forEach((node) => {
-            node.dataset.selected = node.dataset.id === itemId ? 'true' : 'false';
+          listEl.querySelectorAll('.email-row').forEach((node) => {
+            node.classList.toggle('is-selected', node.dataset.id === itemId);
           });
           this.openMobileReader(listEl);
           this.renderReaderPane(item);
         }
-
-        const isExpanded = cardEl.dataset.expanded === 'true';
-        cardEl.dataset.expanded = isExpanded ? 'false' : 'true';
-        expandedEl.hidden = isExpanded;
       });
 
-      openEl.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (!safeOpenUrl) {
-          event.preventDefault();
-        }
+      return rowEl;
+    };
+
+    // ── Render with or without priority grouping ────────────────────────────
+    const useGrouping = typeof PortalState !== 'undefined' && PortalState.getGroupByPriority
+      ? PortalState.getGroupByPriority()
+      : true;
+
+    if (useGrouping && typeof EmailHelpers !== 'undefined' && EmailHelpers.groupByPriorityTier) {
+      const groups = EmailHelpers.groupByPriorityTier(safeItems);
+
+      groups.forEach((group) => {
+        // Tier header
+        const headerEl = document.createElement('div');
+        headerEl.className = 'tier-header tier-header--' + group.key;
+        headerEl.dataset.tier = group.key;
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'tier-header__label';
+        labelEl.textContent = group.label;
+
+        const countEl = document.createElement('span');
+        countEl.className = 'tier-header__count';
+        countEl.textContent = String(group.items.length);
+
+        const lineEl = document.createElement('span');
+        lineEl.className = 'tier-header__line';
+
+        const chevronEl = document.createElement('span');
+        chevronEl.className = 'tier-header__chevron';
+        chevronEl.textContent = '\u25BE';
+
+        headerEl.append(labelEl, countEl, lineEl, chevronEl);
+
+        // Tier group container
+        const groupEl = document.createElement('div');
+        groupEl.className = 'tier-group';
+        groupEl.dataset.tier = group.key;
+
+        group.items.forEach((item) => {
+          groupEl.appendChild(buildEmailRow(item));
+        });
+
+        // Collapse toggle
+        headerEl.addEventListener('click', () => {
+          headerEl.classList.toggle('is-collapsed');
+          groupEl.classList.toggle('is-collapsed');
+        });
+
+        listEl.append(headerEl, groupEl);
       });
+    } else {
+      // Flat list — no tier headers
+      safeItems.forEach((item) => {
+        listEl.appendChild(buildEmailRow(item));
+      });
+    }
+  }
 
-      pinEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
+  // ── Stubs for action handlers (attached via delegation or kept for reader pane) ──
+  _handleEmailPin(item, itemId) {
+    if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+      return;
+    }
 
-        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
-          return;
+    const currentUiState = item && item.uiState ? item.uiState : {};
+    const newPinnedValue = !Boolean(currentUiState.pinned);
+
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: Boolean(newPinnedValue) }),
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload.success) {
+          throw new Error(payload.error || 'Failed');
         }
-
-        const currentUiState = item && item.uiState ? item.uiState : {};
-        const newPinnedValue = !Boolean(currentUiState.pinned);
-
-        try {
-          const response = await fetch(`/api/emails/${encodeURIComponent(itemId)}/pin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: Boolean(newPinnedValue) }),
-          });
-          const payload = await response.json();
-          if (!payload.success) {
-            throw new Error(payload.error || `HTTP ${response.status}`);
-          }
-        } catch (error) {
-          alert(`Failed to update pin state in Outlook: ${error.message}`);
-          return;
-        }
-
         const state = PortalState.readEmailUiState();
         const newDoneValue = Boolean(currentUiState.done);
         state[itemId] = {
@@ -1035,159 +1115,31 @@ class DashboardClient {
           done: Boolean(newDoneValue),
           updatedAt: new Date().toISOString(),
         };
-
         PortalState.writeEmailUiState(state);
         this.renderTriage();
+      })
+      .catch((error) => {
+        alert(`Failed to update pin state in Outlook: ${error.message}`);
       });
+  }
 
-      doneEl.addEventListener('click', (event) => {
-        event.stopPropagation();
+  _handleEmailDone(item, itemId) {
+    if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+      return;
+    }
 
-        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
-          return;
-        }
+    const state = PortalState.readEmailUiState();
+    const currentUiState = item && item.uiState ? item.uiState : {};
+    const newPinnedValue = Boolean(currentUiState.pinned);
+    const newDoneValue = !Boolean(currentUiState.done);
+    state[itemId] = {
+      pinned: Boolean(newPinnedValue),
+      done: Boolean(newDoneValue),
+      updatedAt: new Date().toISOString(),
+    };
 
-        const state = PortalState.readEmailUiState();
-        const currentUiState = item && item.uiState ? item.uiState : {};
-        const newPinnedValue = Boolean(currentUiState.pinned);
-        const newDoneValue = !Boolean(currentUiState.done);
-        state[itemId] = {
-          pinned: Boolean(newPinnedValue),
-          done: Boolean(newDoneValue),
-          updatedAt: new Date().toISOString(),
-        };
-
-        PortalState.writeEmailUiState(state);
-        this.renderTriage();
-      });
-
-      draftEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        try {
-          const generatedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
-            method: 'POST',
-          });
-          const generatedData = await generatedRes.json();
-          if (!generatedData.success) {
-            throw new Error(generatedData.error || `HTTP ${generatedRes.status}`);
-          }
-
-          const generatedDraft = generatedData.draft || {};
-          const providerNotice = formatDraftProviderNotice(generatedDraft);
-          const editedDraft = await this.openDraftEditorModal({
-            subject: generatedDraft.subject,
-            body: generatedDraft.body,
-            providerNotice,
-          });
-          if (!editedDraft) {
-            return;
-          }
-
-          const savedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subject: editedDraft.subject,
-              body: editedDraft.body,
-            }),
-          });
-          const savedData = await savedRes.json();
-          if (!savedData.success) {
-            throw new Error(savedData.error || `HTTP ${savedRes.status}`);
-          }
-
-          if (!window.confirm(`${providerNotice}\nApprove this draft for sending?`)) {
-            return;
-          }
-
-          const approvedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/approve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ approvedBy: 'user' }),
-          });
-          const approvedData = await approvedRes.json();
-          if (!approvedData.success) {
-            throw new Error(approvedData.error || `HTTP ${approvedRes.status}`);
-          }
-
-          if (!window.confirm(`${providerNotice}\nSend approved draft now?`)) {
-            return;
-          }
-
-          const sendRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/send`, {
-            method: 'POST',
-          });
-          const sendData = await sendRes.json();
-          if (!sendData.success) {
-            throw new Error(sendData.error || `HTTP ${sendRes.status}`);
-          }
-
-          alert('Draft sent successfully.');
-        } catch (err) {
-          alert(`Draft flow failed: ${err.message}`);
-        }
-      });
-
-      deleteEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        if (!confirm('Are you sure you want to delete this email?')) {
-          return;
-        }
-
-        try {
-          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/delete`, {
-            method: 'POST',
-          });
-          const data = await res.json();
-          if (!data.success) {
-            throw new Error(data.error || `HTTP ${res.status}`);
-          }
-
-          // Remove the email from the list
-          cardEl.remove();
-          if (document.getElementById('triageList').children.length === 0) {
-            const emptyStateEl = document.getElementById('emailEmptyState');
-            if (emptyStateEl) {
-              emptyStateEl.textContent = 'No emails found.';
-              emptyStateEl.hidden = false;
-            }
-          }
-        } catch (err) {
-          alert(`Failed to delete email: ${err.message}`);
-        }
-      });
-
-      archiveEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        try {
-          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/archive`, {
-            method: 'POST',
-          });
-          const data = await res.json();
-          if (!data.success) {
-            throw new Error(data.error || `HTTP ${res.status}`);
-          }
-
-          // Archive the email by removing it from the list
-          cardEl.remove();
-          if (document.getElementById('triageList').children.length === 0) {
-            const emptyStateEl = document.getElementById('emailEmptyState');
-            if (emptyStateEl) {
-              emptyStateEl.textContent = 'No emails found.';
-              emptyStateEl.hidden = false;
-            }
-          }
-        } catch (err) {
-          alert(`Failed to archive email: ${err.message}`);
-        }
-      });
-
-      cardEl.append(collapsedEl, actionsEl, expandedEl);
-      listEl.appendChild(cardEl);
-    });
+    PortalState.writeEmailUiState(state);
+    this.renderTriage();
   }
 
   renderReaderPane(item) {
@@ -1685,12 +1637,23 @@ function applyTagFilter(items, tag) {
   });
 }
 
+function applyTagsFilter(items, tags) {
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return items;
+  }
+  return items.filter((item) => {
+    const itemTags = Array.isArray(item && item.tags) ? item.tags : [];
+    return tags.some((t) => itemTags.includes(t));
+  });
+}
+
 function applyEmailFilters(items, filters) {
   const safeFilters = filters || {};
   const searched = applySearch(items, safeFilters.search);
   const categoryFiltered = applyCategoryFilter(searched, safeFilters.category);
   const stateFiltered = applyStateFilter(categoryFiltered, safeFilters.state);
-  return applyTagFilter(stateFiltered, safeFilters.tag);
+  const tagFiltered = applyTagFilter(stateFiltered, safeFilters.tag);
+  return applyTagsFilter(tagFiltered, safeFilters.tags);
 }
 
 function resolveEmptyStateMessage({ triageError, filters }) {
@@ -1800,36 +1763,26 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ── Email filter handlers ──────────────────────────────────────────────────
-  document.querySelectorAll('[data-category]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashboard.emailFilters.category = btn.dataset.category || null;
-      dashboard.renderTriage();
-    });
-  });
-
-  document.querySelectorAll('[data-state]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashboard.emailFilters.state = btn.dataset.state || null;
-      dashboard.renderTriage();
-    });
-  });
-
-  const tagList = document.getElementById('tagList');
-  if (tagList) {
-    tagList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-tag]');
-      if (!target) {
-        return;
-      }
-      dashboard.emailFilters.tag = toggleFilterValue(dashboard.emailFilters.tag, target.dataset.tag);
-      dashboard.renderTriage();
-    });
-  }
+  // Category and state pill click handlers are attached dynamically in updateFilterCounts().
 
   const emailSearch = document.getElementById('emailSearch');
+  const emailSearchClear = document.getElementById('emailSearchClear');
   if (emailSearch) {
     emailSearch.addEventListener('input', (e) => {
       dashboard.emailFilters.search = e.target.value;
+      if (emailSearchClear) {
+        emailSearchClear.hidden = !e.target.value;
+      }
+      dashboard.renderTriage();
+    });
+  }
+  if (emailSearchClear) {
+    emailSearchClear.addEventListener('click', () => {
+      if (emailSearch) {
+        emailSearch.value = '';
+      }
+      dashboard.emailFilters.search = '';
+      emailSearchClear.hidden = true;
       dashboard.renderTriage();
     });
   }
