@@ -1,0 +1,256 @@
+/* =============================================================
+   settings.css — Tabbed settings layout, connection card,
+   provider selectors, save bar, graph popover
+   ============================================================= */
+
+/* ─── View title ─────────────────────────────────────────────── */
+
+.view-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 18px;
+}
+
+/* ─── Settings tabs ──────────────────────────────────────────── */
+
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 22px;
+}
+
+/* ─── Settings content area ──────────────────────────────────── */
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ─── Card section headings ──────────────────────────────────── */
+
+.card__title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.card__description {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+/* ─── Stat grid (connection card) ────────────────────────────── */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: var(--bg-canvas);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.stat-card__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.stat-card__value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ─── Provider selector cards ────────────────────────────────── */
+
+.provider-options {
+  display: flex;
+  gap: 10px;
+}
+
+.provider-option {
+  flex: 1;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.provider-option:hover {
+  border-color: var(--accent-ai);
+}
+
+.provider-option.is-selected {
+  border: 2px solid var(--accent-ai);
+  background: var(--bg-surface-warm);
+}
+
+.provider-option__name {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.provider-option__desc {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+/* ─── Connection status card ─────────────────────────────────── */
+
+.connection-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.connection-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.connection-icon--success { background: #f0faf3; }
+.connection-icon--warning { background: var(--cat-waiting-bg); }
+.connection-icon--error   { background: var(--cat-needs-reply-bg); }
+
+.connection-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.connection-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.connection-meta__title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.connection-status-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.connection-status-text--success { color: var(--status-success); }
+.connection-status-text--warning { color: var(--status-warning); }
+.connection-status-text--error   { color: var(--status-error); }
+
+/* ─── Sticky save bar ────────────────────────────────────────── */
+
+.settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--bg-surface-warm);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  z-index: 10;
+}
+
+.settings-dirty-text {
+  flex: 1;
+  font-size: 0.8125rem;
+  color: var(--status-warning);
+  font-weight: 500;
+}
+
+/* ─── Setting group ──────────────────────────────────────────── */
+
+.setting-group {
+  margin-bottom: 14px;
+}
+
+.setting-group:last-child {
+  margin-bottom: 0;
+}
+
+/* ─── Graph status popover (from icon rail) ──────────────────── */
+
+.graph-popover {
+  position: fixed;
+  bottom: 60px;
+  left: 64px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 200;
+  width: 280px;
+}
+
+.graph-popover .connection-header {
+  margin-bottom: 12px;
+}
+
+.graph-popover .stat-grid {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.graph-popover .stat-card {
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.graph-popover .stat-card__label {
+  margin-bottom: 0;
+}
+
+.graph-popover .stat-card__value {
+  font-size: 0.8125rem;
+}
+
+/* ─── Settings view wrapper padding ──────────────────────────── */
+
+[data-view="settings"] {
+  padding: 28px 32px;
+  max-width: 740px;
+}
+
+/* ─── Graph auth elements within connection card ─────────────── */
+
+.graph-auth-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.graph-auth-row input[type="text"] {
+  min-width: 180px;
+}
+
+.graph-auth-status {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}

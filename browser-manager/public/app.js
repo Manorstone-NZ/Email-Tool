@@ -191,27 +191,13 @@ class DashboardClient {
       const res = await fetch('/api/settings');
       const data = await res.json();
       if (!data.success) return;
-      const s = data.settings;
-      this.fillSettingsForm(s);
-      await this.loadArchiveFolderOptions(s.archiveFolderId || '');
+      this._settingsData = data.settings || {};
+      this.renderSettingsTabs();
+      this.renderActiveSettingsTab();
+      await this.loadArchiveFolderOptions(this._settingsData.archiveFolderId || '');
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
-
-    const panel = document.getElementById('settings-panel');
-    if (panel) {
-      const api = {
-        getSettings: () => fetch('/api/settings/categorisation').then(r => r.json()),
-        putSettings: (settings) => fetch('/api/settings/categorisation', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings),
-        }).then(r => r.json()),
-      };
-      await renderSettingsPanel(panel, api);
-    }
-
-    // Setup Graph Auth button after settings are loaded
     this.setupGraphAuthButton();
   }
 
@@ -405,65 +391,365 @@ class DashboardClient {
     this.renderLogs();
   }
 
-  fillSettingsForm(s) {
-    const f = (id) => document.getElementById(id);
-    const settings = s && typeof s === 'object' ? s : {};
-    const knownKeys = new Set([
-      'emailProvider',
-      'graphClientId',
-      'graphTenantId',
-      'archiveFolderId',
-      'emailSignature',
-      'lookbackDays',
-      'minScore',
-      'vipSenders',
-      'aiProviderPrimary',
-      'aiProviderFallback',
-      'anthropicApiKey',
-      'openaiApiKey',
-      'aiOpenAiModel',
-      'aiDraftEnabled',
-      'maxDraftLength',
+  // ── Settings tab constants ─────────────────────────────────────────────────
+  static get SETTINGS_TABS() {
+    return [
+      { id: 'connection', label: 'Connection' },
+      { id: 'ai-providers', label: 'AI Providers' },
+      { id: 'categorization', label: 'Categorization' },
+      { id: 'advanced', label: 'Advanced' },
+    ];
+  }
+
+  static get KNOWN_SETTINGS_KEYS() {
+    return new Set([
+      'emailProvider', 'graphClientId', 'graphTenantId', 'archiveFolderId',
+      'emailSignature', 'lookbackDays', 'minScore', 'vipSenders',
+      'aiProviderPrimary', 'aiProviderFallback', 'anthropicApiKey',
+      'openaiApiKey', 'aiOpenAiModel', 'aiDraftEnabled', 'maxDraftLength',
     ]);
+  }
+
+  // ── Render tab pills ──────────────────────────────────────────────────────
+  renderSettingsTabs() {
+    const container = document.getElementById('settingsTabs');
+    if (!container) return;
+    const activeTab = (typeof PortalState !== 'undefined' ? PortalState.getSettingsTab() : 'connection') || 'connection';
+    // Normalise: map legacy 'general' to 'connection'
+    const normTab = activeTab === 'general' ? 'connection' : activeTab;
+
+    container.innerHTML = DashboardClient.SETTINGS_TABS.map((tab) =>
+      `<button type="button" class="pill${tab.id === normTab ? ' is-active' : ''}" data-settings-tab="${tab.id}">${tab.label}</button>`
+    ).join('');
+
+    container.querySelectorAll('[data-settings-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (typeof PortalState !== 'undefined') PortalState.setSettingsTab(btn.dataset.settingsTab);
+        this.renderSettingsTabs();
+        this.renderActiveSettingsTab();
+      });
+    });
+  }
+
+  // ── Render active tab content ─────────────────────────────────────────────
+  renderActiveSettingsTab() {
+    const container = document.getElementById('settingsContent');
+    if (!container) return;
+    const s = this._settingsData || {};
+    let activeTab = (typeof PortalState !== 'undefined' ? PortalState.getSettingsTab() : 'connection') || 'connection';
+    if (activeTab === 'general') activeTab = 'connection';
+
+    switch (activeTab) {
+      case 'connection': container.innerHTML = this._renderConnectionTab(s); break;
+      case 'ai-providers': container.innerHTML = this._renderAiProvidersTab(s); break;
+      case 'categorization': container.innerHTML = this._renderCategorizationTab(s); break;
+      case 'advanced': container.innerHTML = this._renderAdvancedTab(s); break;
+      default: container.innerHTML = this._renderConnectionTab(s);
+    }
+
+    // Wire up dirty tracking
+    this._wireSettingsDirtyTracking();
+    // Hide save bar after render (clean state)
+    this._setSettingsDirty(false);
+  }
+
+  // ── Connection tab ────────────────────────────────────────────────────────
+  _renderConnectionTab(s) {
+    const isConnected = s.graphClientId && s.graphTenantId;
+    const statusClass = isConnected ? 'success' : 'error';
+    const statusLabel = isConnected ? 'Connected' : 'Disconnected';
+    const statusIcon = isConnected
+      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+      : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+    const selectedProvider = s.emailProvider || 'auto';
+    const providers = [
+      { value: 'graph', name: 'Microsoft Graph', desc: 'Direct API access via Azure AD' },
+      { value: 'chrome', name: 'Chrome', desc: 'Outlook Web via browser extension' },
+      { value: 'auto', name: 'Auto-detect', desc: 'Automatically choose best provider' },
+    ];
+
+    return `
+      <div class="card">
+        <div class="connection-header">
+          <div class="connection-icon connection-icon--${statusClass}">${statusIcon}</div>
+          <div class="connection-meta">
+            <div class="connection-meta__title">Microsoft Graph</div>
+            <div class="connection-status-text connection-status-text--${statusClass}">${statusLabel}</div>
+          </div>
+          <button type="button" id="graphAuthButton" class="btn btn--secondary btn--sm">Reconnect</button>
+        </div>
+        <div id="graphAuthCodeRow" style="display:none; margin-bottom:8px; gap:8px; align-items:center;">
+          <input id="graphAuthDeviceCode" type="text" readonly class="form-input" aria-label="Graph device code" style="min-width:180px;">
+          <button type="button" id="graphAuthCopyCodeBtn" class="btn btn--ghost btn--sm">Copy code</button>
+        </div>
+        <div id="graphAuthStatus" class="graph-auth-status" aria-live="polite"></div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-card__label">Token Expiry</div>
+            <div class="stat-card__value" id="statTokenExpiry">${isConnected ? 'Active' : '--'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card__label">Last Sync</div>
+            <div class="stat-card__value" id="statLastSync">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card__label">Account</div>
+            <div class="stat-card__value" id="statAccount">${s.graphTenantId || '--'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Email Provider</div>
+        <div class="card__description">Choose how the app fetches your email.</div>
+        <div class="provider-options">
+          ${providers.map((p) => `
+            <div class="provider-option${p.value === selectedProvider ? ' is-selected' : ''}" data-provider="${p.value}">
+              <div class="provider-option__name">${p.name}</div>
+              <div class="provider-option__desc">${p.desc}</div>
+            </div>
+          `).join('')}
+        </div>
+        <input type="hidden" id="setting-provider" value="${selectedProvider}">
+      </div>
+
+      <div class="card">
+        <div class="card__title">Archive Destination</div>
+        <div class="card__description">When set, Archive action moves emails into this Outlook folder.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-archiveFolder">Folder</label>
+          <select id="setting-archiveFolder" class="form-select">
+            <option value="">Default archive behavior</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Inbox Lookback</div>
+        <div class="card__description">Graph triage scans messages in this recent window (plus flagged).</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-lookbackDays">Days</label>
+          <input id="setting-lookbackDays" type="number" class="form-input" min="1" max="60" value="${s.lookbackDays ?? 3}">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Graph Credentials</div>
+        <div class="card__description">Azure AD application registration details.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-clientId">Client ID</label>
+          <input id="setting-clientId" type="text" class="form-input" placeholder="Azure app client ID" spellcheck="false" value="${this._escapeAttr(s.graphClientId || '')}">
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-tenantId">Tenant ID</label>
+          <input id="setting-tenantId" type="text" class="form-input" placeholder="organizations" value="${this._escapeAttr(s.graphTenantId || 'organizations')}">
+        </div>
+      </div>
+    `;
+  }
+
+  // ── AI Providers tab ──────────────────────────────────────────────────────
+  _renderAiProvidersTab(s) {
+    const providerOptions = `
+      <option value="claude-opus">Claude Opus</option>
+      <option value="openai-gpt41">OpenAI (GPT-4.1)</option>
+      <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+    `;
+    const fallbackOptions = `
+      <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+      <option value="openai-gpt54">OpenAI (GPT-5.4)</option>
+      <option value="claude-opus">Claude Opus</option>
+    `;
+    const modelOptions = `
+      <option value="gpt-5.4">GPT-5.4 (Flagship)</option>
+      <option value="gpt-5.4-mini">GPT-5.4 Mini (Cost-effective)</option>
+      <option value="gpt-5.4-nano">GPT-5.4 Nano (Budget)</option>
+      <option value="gpt-4o">GPT-4o</option>
+      <option value="gpt-4o-mini">GPT-4o Mini</option>
+    `;
+
+    return `
+      <div class="card">
+        <div class="card__title">Primary Provider</div>
+        <div class="card__description">Main AI provider for categorization and drafting.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiPrimary">Provider</label>
+          <select id="setting-aiPrimary" class="form-select">${providerOptions}</select>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiOpenAiModel">OpenAI Model</label>
+          <select id="setting-aiOpenAiModel" class="form-select">${modelOptions}</select>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-openaiApiKey">OpenAI API Key</label>
+          <input id="setting-openaiApiKey" type="password" class="form-input" placeholder="sk-..." autocomplete="off" spellcheck="false" value="${this._escapeAttr(s.openaiApiKey || '')}">
+          <div class="form-hint">Used for OpenAI primary/fallback calls.</div>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-anthropicApiKey">Anthropic API Key</label>
+          <input id="setting-anthropicApiKey" type="password" class="form-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" value="${this._escapeAttr(s.anthropicApiKey || '')}">
+          <div class="form-hint">Used for Claude primary/fallback calls.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Fallback Provider</div>
+        <div class="card__description">Used when primary provider is unavailable.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiFallback">Provider</label>
+          <select id="setting-aiFallback" class="form-select">${fallbackOptions}</select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">AI Settings</div>
+        <div class="card__description">Control AI drafting behavior.</div>
+        <div class="setting-group" style="display:flex;align-items:center;gap:12px;">
+          <label class="toggle">
+            <input type="checkbox" id="setting-aiDraftEnabled" ${s.aiDraftEnabled !== false ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+            <span class="toggle-knob"></span>
+          </label>
+          <span class="form-label" style="margin-bottom:0;">Enable AI Drafting</span>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-maxDraftLength">Max Draft Length (chars)</label>
+          <input id="setting-maxDraftLength" type="number" class="form-input" min="200" max="12000" value="${s.maxDraftLength ?? 4000}">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Scoring &amp; Priority</div>
+        <div class="card__description">Configure triage scoring thresholds.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-minScore">Priority Threshold (%)</label>
+          <input id="setting-minScore" type="number" class="form-input" min="0" max="100" value="${s.minScore ?? 20}">
+        </div>
+        <div class="setting-group" style="display:flex;align-items:center;gap:12px;">
+          <label class="toggle">
+            <input type="checkbox" id="setting-groupByPriority" ${(typeof PortalState !== 'undefined' && PortalState.getGroupByPriority()) ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+            <span class="toggle-knob"></span>
+          </label>
+          <span class="form-label" style="margin-bottom:0;">Group by Priority</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Categorization tab (placeholder for Task 8) ───────────────────────────
+  _renderCategorizationTab(_s) {
+    return `
+      <div class="card">
+        <div class="card__title">Categorization</div>
+        <p style="font-size:0.8125rem;color:var(--text-muted);">Category, topic label, and custom rule configuration coming in next update.</p>
+      </div>
+    `;
+  }
+
+  // ── Advanced tab ──────────────────────────────────────────────────────────
+  _renderAdvancedTab(s) {
+    const vipValue = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
+    const knownKeys = DashboardClient.KNOWN_SETTINGS_KEYS;
+    const extraSettings = {};
+    Object.keys(s).forEach((key) => {
+      if (!knownKeys.has(key)) extraSettings[key] = s[key];
+    });
+    const extraJson = Object.keys(extraSettings).length ? JSON.stringify(extraSettings, null, 2) : '';
+
+    return `
+      <div class="card">
+        <div class="card__title">VIP Senders</div>
+        <div class="card__description">Emails from these senders are always prioritised.</div>
+        <div class="setting-group">
+          <textarea id="setting-vipSenders" class="form-textarea" rows="3" placeholder="ceo@, vp@, director@">${this._escapeHtml(vipValue)}</textarea>
+          <div class="form-hint">Comma-separated prefixes or addresses</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Email Signature</div>
+        <div class="card__description">Appended to AI-generated draft replies.</div>
+        <div class="setting-group">
+          <textarea id="setting-emailSignature" class="form-textarea" rows="4" placeholder="Kind regards,\nDamian">${this._escapeHtml(s.emailSignature || '')}</textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Additional Settings (JSON)</div>
+        <div class="card__description">Custom keys are loaded here and saved back to settings.</div>
+        <div class="setting-group">
+          <textarea id="setting-extra" class="form-textarea" rows="6" placeholder='{\n  "graphScopes": ["Mail.Read", "User.Read"]\n}'>${this._escapeHtml(extraJson)}</textarea>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Post-render: set select values (must be called after innerHTML) ───────
+  _applySelectValues() {
+    const s = this._settingsData || {};
+    const f = (id) => document.getElementById(id);
     if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
-    if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
-    if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
     if (f('setting-archiveFolder')) f('setting-archiveFolder').value = s.archiveFolderId || '';
-    if (f('setting-lookbackDays')) f('setting-lookbackDays').value = s.lookbackDays ?? 3;
-    if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
     if (f('setting-aiPrimary')) f('setting-aiPrimary').value = s.aiProviderPrimary || 'claude-opus';
     if (f('setting-aiFallback')) f('setting-aiFallback').value = s.aiProviderFallback || 'gemma-lmstudio';
-    if (f('setting-openaiApiKey')) f('setting-openaiApiKey').value = s.openaiApiKey || '';
     if (f('setting-aiOpenAiModel')) f('setting-aiOpenAiModel').value = s.aiOpenAiModel || 'gpt-5.4';
-    if (f('setting-anthropicApiKey')) f('setting-anthropicApiKey').value = s.anthropicApiKey || '';
-    if (f('setting-aiDraftEnabled')) f('setting-aiDraftEnabled').checked = s.aiDraftEnabled !== false;
-    if (f('setting-maxDraftLength')) f('setting-maxDraftLength').value = s.maxDraftLength ?? 4000;
-    if (f('setting-vipSenders')) {
-      f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
-    }
-    if (f('setting-emailSignature')) {
-      f('setting-emailSignature').value = s.emailSignature || '';
-    }
-    const extraSettings = {};
-    Object.keys(settings).forEach((key) => {
-      if (!knownKeys.has(key)) {
-        extraSettings[key] = settings[key];
-      }
+  }
+
+  // ── Dirty state tracking ──────────────────────────────────────────────────
+  _wireSettingsDirtyTracking() {
+    const content = document.getElementById('settingsContent');
+    if (!content) return;
+
+    // Set select values after render
+    this._applySelectValues();
+
+    // Wire provider option cards
+    content.querySelectorAll('.provider-option').forEach((card) => {
+      card.addEventListener('click', () => {
+        content.querySelectorAll('.provider-option').forEach((c) => c.classList.remove('is-selected'));
+        card.classList.add('is-selected');
+        const hiddenInput = document.getElementById('setting-provider');
+        if (hiddenInput) hiddenInput.value = card.dataset.provider;
+        this._setSettingsDirty(true);
+      });
     });
-    if (f('setting-extra')) {
-      f('setting-extra').value = Object.keys(extraSettings).length ? JSON.stringify(extraSettings, null, 2) : '';
+
+    // Track changes on inputs/selects/textareas
+    content.querySelectorAll('input, select, textarea').forEach((el) => {
+      el.addEventListener('input', () => this._setSettingsDirty(true));
+      el.addEventListener('change', () => this._setSettingsDirty(true));
+    });
+
+    // Wire group-by-priority toggle directly (not part of server settings)
+    const groupToggle = document.getElementById('setting-groupByPriority');
+    if (groupToggle) {
+      groupToggle.addEventListener('change', () => {
+        if (typeof PortalState !== 'undefined') PortalState.setGroupByPriority(groupToggle.checked);
+      });
     }
   }
 
-  async saveSettings(formData) {
-    const statusEl = document.getElementById('settingsSaveStatus');
-    const btn = document.querySelector('#settingsForm button[type="submit"]');
-    if (btn) btn.disabled = true;
-    if (statusEl) statusEl.textContent = 'Saving…';
+  _setSettingsDirty(dirty) {
+    if (typeof PortalState !== 'undefined') PortalState.setSettingsDirty(dirty);
+    const bar = document.getElementById('settingsSaveBar');
+    if (bar) bar.hidden = !dirty;
+  }
 
-    const vipRaw = formData.get('vipSenders') || '';
+  // ── Gather values from current form controls and save ─────────────────────
+  async saveSettings() {
+    const saveBtn = document.getElementById('settingsSave');
+    if (saveBtn) saveBtn.disabled = true;
+
+    const f = (id) => {
+      const el = document.getElementById(id);
+      return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined;
+    };
+
     try {
-      const extraRaw = String(formData.get('extraSettingsJson') || '').trim();
+      const vipRaw = String(f('setting-vipSenders') || '');
+      const extraRaw = String(f('setting-extra') || '').trim();
       let extraSettings = {};
       if (extraRaw) {
         const parsed = JSON.parse(extraRaw);
@@ -473,45 +759,115 @@ class DashboardClient {
         extraSettings = parsed;
       }
 
+      // Merge with existing data so we don't lose fields from other tabs
       const payload = {
-        emailProvider: formData.get('emailProvider'),
-        graphClientId: formData.get('graphClientId'),
-        graphTenantId: formData.get('graphTenantId') || 'organizations',
-        archiveFolderId: formData.get('archiveFolderId') || '',
-        lookbackDays: Number(formData.get('lookbackDays')) || 3,
-        minScore: Number(formData.get('minScore')) || 20,
-        vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
-        emailSignature: formData.get('emailSignature') || '',
-        aiProviderPrimary: formData.get('aiProviderPrimary') || 'claude-opus',
-        aiProviderFallback: formData.get('aiProviderFallback') || 'gemma-lmstudio',
-        openaiApiKey: formData.get('openaiApiKey') || '',
-        aiOpenAiModel: formData.get('aiOpenAiModel') || 'gpt-4.1',
-        anthropicApiKey: formData.get('anthropicApiKey') || '',
-        aiDraftEnabled: formData.get('aiDraftEnabled') === 'on',
-        maxDraftLength: Number(formData.get('maxDraftLength')) || 4000,
-        extraSettings
+        ...(this._settingsData || {}),
+        emailProvider: f('setting-provider') ?? this._settingsData?.emailProvider ?? 'auto',
+        graphClientId: f('setting-clientId') ?? this._settingsData?.graphClientId ?? '',
+        graphTenantId: f('setting-tenantId') ?? this._settingsData?.graphTenantId ?? 'organizations',
+        archiveFolderId: f('setting-archiveFolder') ?? this._settingsData?.archiveFolderId ?? '',
+        lookbackDays: Number(f('setting-lookbackDays')) || this._settingsData?.lookbackDays || 3,
+        minScore: Number(f('setting-minScore')) || this._settingsData?.minScore || 20,
+        vipSenders: f('setting-vipSenders') !== undefined
+          ? vipRaw.split(',').map((s) => s.trim()).filter(Boolean)
+          : (this._settingsData?.vipSenders || []),
+        emailSignature: f('setting-emailSignature') ?? this._settingsData?.emailSignature ?? '',
+        aiProviderPrimary: f('setting-aiPrimary') ?? this._settingsData?.aiProviderPrimary ?? 'claude-opus',
+        aiProviderFallback: f('setting-aiFallback') ?? this._settingsData?.aiProviderFallback ?? 'gemma-lmstudio',
+        openaiApiKey: f('setting-openaiApiKey') ?? this._settingsData?.openaiApiKey ?? '',
+        aiOpenAiModel: f('setting-aiOpenAiModel') ?? this._settingsData?.aiOpenAiModel ?? 'gpt-5.4',
+        anthropicApiKey: f('setting-anthropicApiKey') ?? this._settingsData?.anthropicApiKey ?? '',
+        aiDraftEnabled: f('setting-aiDraftEnabled') !== undefined ? f('setting-aiDraftEnabled') : (this._settingsData?.aiDraftEnabled !== false),
+        maxDraftLength: Number(f('setting-maxDraftLength')) || this._settingsData?.maxDraftLength || 4000,
+        extraSettings,
       };
 
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || `HTTP ${res.status}`);
-      if (statusEl) {
-        statusEl.textContent = 'Saved';
-        statusEl.className = 'settings-save-status saved';
-        setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'settings-save-status'; }, 2000);
-      }
+
+      // Update local cache
+      this._settingsData = payload;
+      this._setSettingsDirty(false);
     } catch (e) {
-      if (statusEl) {
-        statusEl.textContent = `Error: ${e.message}`;
-        statusEl.className = 'settings-save-status error';
-      }
+      console.error('Save settings error:', e);
+      alert('Failed to save settings: ' + e.message);
     } finally {
-      if (btn) btn.disabled = false;
+      if (saveBtn) saveBtn.disabled = false;
     }
+  }
+
+  // ── HTML helpers for settings templates ────────────────────────────────────
+  _escapeAttr(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  _escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Graph status popover ──────────────────────────────────────────────────
+  toggleGraphPopover() {
+    let popover = document.querySelector('.graph-popover');
+    if (popover) {
+      popover.remove();
+      return;
+    }
+
+    const s = this._settingsData || {};
+    const isConnected = s.graphClientId && s.graphTenantId;
+    const statusClass = isConnected ? 'success' : 'error';
+    const statusLabel = isConnected ? 'Connected' : 'Disconnected';
+    const statusIcon = isConnected
+      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+      : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+    popover = document.createElement('div');
+    popover.className = 'graph-popover';
+    popover.innerHTML = `
+      <div class="connection-header">
+        <div class="connection-icon connection-icon--${statusClass}">${statusIcon}</div>
+        <div class="connection-meta">
+          <div class="connection-meta__title">Microsoft Graph</div>
+          <div class="connection-status-text connection-status-text--${statusClass}">${statusLabel}</div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-card__label">Token</div>
+          <div class="stat-card__value">${isConnected ? 'Active' : '--'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Tenant</div>
+          <div class="stat-card__value">${s.graphTenantId || '--'}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Provider</div>
+          <div class="stat-card__value">${s.emailProvider || 'auto'}</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(popover);
+
+    // Close on click outside
+    const closeHandler = (e) => {
+      if (!popover.contains(e.target) && e.target.id !== 'graphStatusBtn' && !e.target.closest('#graphStatusBtn')) {
+        popover.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  // Backward-compat stub
+  fillSettingsForm(s) {
+    this._settingsData = s;
+    this.renderSettingsTabs();
+    this.renderActiveSettingsTab();
   }
 
   async refreshTriage() {    const statusEl = document.getElementById('triageStatus');
@@ -2125,16 +2481,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Settings panel toggle — removed (settings now live in dedicated view)
 
-  // Settings form
-  const settingsForm = document.getElementById('settingsForm');
-  if (settingsForm) {
-    settingsForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      dashboard.saveSettings(new FormData(settingsForm));
+  // Settings save / discard
+  const settingsSaveBtn = document.getElementById('settingsSave');
+  if (settingsSaveBtn) {
+    settingsSaveBtn.addEventListener('click', () => {
+      dashboard.saveSettings();
     });
   }
 
-  // Load current settings into form
+  const settingsDiscardBtn = document.getElementById('settingsDiscard');
+  if (settingsDiscardBtn) {
+    settingsDiscardBtn.addEventListener('click', () => {
+      dashboard.loadSettings();
+    });
+  }
+
+  // Graph status popover toggle
+  const graphStatusBtn = document.getElementById('graphStatusBtn');
+  if (graphStatusBtn) {
+    graphStatusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dashboard.toggleGraphPopover();
+    });
+  }
+
+  // Load current settings
   dashboard.loadSettings();
 
   // ── Logs filter handlers ──────────────────────────────────────────────────
