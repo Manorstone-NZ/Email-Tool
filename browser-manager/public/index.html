@@ -245,29 +245,10 @@
         </main>
     </div>
 
-    <div id="draftEditorModal" class="draft-editor-modal" hidden>
-        <div class="draft-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="draftEditorTitle">
-            <h3 id="draftEditorTitle">Edit draft before approval</h3>
-            <p id="draftEditorProviderNotice" class="draft-editor-provider-notice"></p>
-
-            <label class="draft-editor-label" for="draftEditorSubject">Subject</label>
-            <input id="draftEditorSubject" class="draft-editor-input" type="text" autocomplete="off" spellcheck="false">
-
-            <label class="draft-editor-label" for="draftEditorBody">Body</label>
-            <textarea id="draftEditorBody" class="draft-editor-textarea" rows="14" spellcheck="true"></textarea>
-
-            <div class="draft-editor-actions">
-                <button type="button" id="draftEditorCancel" class="btn btn-secondary">Cancel</button>
-                <button type="button" id="draftEditorSave" class="btn btn-primary">Use Draft</button>
-            </div>
-        </div>
-    </div>
-
     <script src="portal-constants.js"></script>
     <script src="portal-state.js"></script>
     <script src="email-helpers.js"></script>
     <script src="ai-provider-helpers.js"></script>
-    <script src="draft-editor-helpers.js"></script>
     <script src="log-helpers.js"></script>
     <script src="app.js"></script>
 </body>

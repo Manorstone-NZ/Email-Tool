@@ -362,6 +362,20 @@ class DashboardServer {
       }
     });
 
+    this.app.post('/api/emails/:emailId/move', async (req, res) => {
+      const { folderId } = req.body || {};
+      if (!folderId) return res.status(400).json({ error: 'folderId required' });
+      if (!this.manager || typeof this.manager.moveEmail !== 'function') {
+        return res.status(503).json({ success: false, error: 'Mail service unavailable' });
+      }
+      try {
+        const result = await this.manager.moveEmail(req.params.emailId, folderId);
+        res.json(result || { success: true });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     this.app.post('/api/emails/:emailId/archive', async (req, res) => {
       if (!this.manager || typeof this.manager.archiveEmail !== 'function') {
         return res.status(503).json({ success: false, error: 'Mail service unavailable' });

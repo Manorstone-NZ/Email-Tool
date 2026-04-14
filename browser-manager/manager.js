@@ -385,6 +385,23 @@ class BrowserManager {
     return this.mailActionService.listMailFolders();
   }
 
+  async moveEmail(emailId, folderId) {
+    const id = String(emailId);
+    const email = this.getEmailById(id);
+    const graphMessageId = (email && email.messageId) ? email.messageId : id;
+
+    const result = await this.mailActionService._graphPatch(
+      `/me/messages/${graphMessageId}`,
+      { parentFolderId: folderId }
+    );
+    this.eventLogger.logUserEvent('email-moved', {
+      emailId: id,
+      graphMessageId,
+      folderId,
+    });
+    return result;
+  }
+
   async markEmailRead(emailId, isRead = true) {
     const id = String(emailId);
     const result = await this.mailActionService.markAsRead(id, isRead);

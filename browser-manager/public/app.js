@@ -246,86 +246,9 @@ class DashboardClient {
   }
 
   async openDraftEditorModal({ subject, body, providerNotice }) {
-    const modal = document.getElementById('draftEditorModal');
-    const subjectInput = document.getElementById('draftEditorSubject');
-    const bodyInput = document.getElementById('draftEditorBody');
-    const providerNoticeEl = document.getElementById('draftEditorProviderNotice');
-    const cancelBtn = document.getElementById('draftEditorCancel');
-    const saveBtn = document.getElementById('draftEditorSave');
-
-    if (!modal || !subjectInput || !bodyInput || !providerNoticeEl || !cancelBtn || !saveBtn) {
-      const fallbackSubject = window.prompt(`Edit draft subject before approval:\n${providerNotice}`, String(subject || ''));
-      if (fallbackSubject === null) {
-        return null;
-      }
-      const fallbackBody = window.prompt(`Edit draft body before approval:\n${providerNotice}`, String(body || ''));
-      if (fallbackBody === null) {
-        return null;
-      }
-      return {
-        subject: fallbackSubject,
-        body: fallbackBody,
-      };
-    }
-
-    providerNoticeEl.textContent = providerNotice;
-    subjectInput.value = String(subject || '');
-    bodyInput.value = String(body || '');
-    bodyInput.rows = calculateDraftEditorRows(bodyInput.value);
-    modal.hidden = false;
-
-    return new Promise((resolve) => {
-      const cleanup = () => {
-        modal.hidden = true;
-        cancelBtn.removeEventListener('click', onCancel);
-        saveBtn.removeEventListener('click', onSave);
-        modal.removeEventListener('click', onBackdropClick);
-        document.removeEventListener('keydown', onKeyDown, true);
-      };
-
-      const onCancel = () => {
-        cleanup();
-        resolve(null);
-      };
-
-      const onSave = () => {
-        cleanup();
-        resolve({
-          subject: subjectInput.value,
-          body: bodyInput.value,
-        });
-      };
-
-      const onBackdropClick = (event) => {
-        if (event.target === modal) {
-          onCancel();
-        }
-      };
-
-      const onKeyDown = (event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          onCancel();
-          return;
-        }
-
-        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-          event.preventDefault();
-          onSave();
-        }
-      };
-
-      cancelBtn.addEventListener('click', onCancel);
-      saveBtn.addEventListener('click', onSave);
-      modal.addEventListener('click', onBackdropClick);
-      document.addEventListener('keydown', onKeyDown, true);
-
-      setTimeout(() => {
-        bodyInput.focus();
-        const cursor = bodyInput.value.length;
-        bodyInput.setSelectionRange(cursor, cursor);
-      }, 0);
-    });
+    // Stub: draft editing is now inline in the reader pane.
+    // Return the values unchanged so callers still work.
+    return { subject: String(subject || ''), body: String(body || '') };
   }
 
   // ── Logs rendering and filtering ──────────────────────────────────────────
@@ -1151,13 +1074,113 @@ class DashboardClient {
     readerPane.innerHTML = '';
 
     if (!item) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'reader-empty';
-      placeholder.textContent = 'Select an email to view details.';
-      readerPane.appendChild(placeholder);
+      readerPane.innerHTML = '<div class="reader-empty">Select an email to read</div>';
       return;
     }
 
+    const itemId = String(item.id || '');
+    const sender = String(item.sender || 'Unknown sender');
+    const senderEmail = String(item.senderEmail || item.from || '');
+    const subject = String(item.subject || 'No subject');
+    const category = String(item.primaryCategory || 'FYI');
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    const score = typeof item.score === 'number' ? item.score : 0;
+    const senderInitials = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
+
+    const avColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.avatarColor
+      ? EmailHelpers.avatarColor(sender)
+      : { bg: '#e8d5c4', fg: '#8b6a4f' };
+    const catColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor
+      ? EmailHelpers.getCategoryColor(category)
+      : { fg: '#777', bg: '#f5f3f0' };
+    const heatColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.scoreToHeatColor
+      ? EmailHelpers.scoreToHeatColor(score)
+      : '#e0dbd4';
+
+    const timestampMeta = typeof EmailHelpers !== 'undefined' && EmailHelpers.resolveDisplayTimestamp
+      ? EmailHelpers.resolveDisplayTimestamp(item)
+      : { value: item.timestamp || item.ingestedAt };
+    const isoTimestamp = String((timestampMeta && timestampMeta.value) || '');
+
+    const currentUiState = item.uiState || {};
+    const isPinned = Boolean(currentUiState.pinned);
+    const isDone = Boolean(currentUiState.done);
+
+    // ── Tag pills HTML ──────────────────────────────────────────────────────
+    const tagPillsHtml = tags.map((t) =>
+      `<span class="pill pill--sm pill--ghost">${this.escapeHtml(String(t))}</span>`
+    ).join('');
+
+    // ── Score detail section ────────────────────────────────────────────────
+    const urgency = this.escapeHtml(String(item.urgency || 'unknown'));
+    const recommendedAction = this.escapeHtml(String(item.recommendedAction || item.action || 'none'));
+    const reasons = Array.isArray(item.reasons) ? item.reasons : [];
+    const reasonsHtml = reasons.map((r) => `<li>${this.escapeHtml(String(r))}</li>`).join('');
+
+    // ── Draft section ───────────────────────────────────────────────────────
+    const draft = item.draft || null;
+    let draftHtml = '';
+    if (draft) {
+      const draftText = this.escapeHtml(String(draft.body || draft.text || ''));
+      const providerName = this.escapeHtml(formatDraftProviderNotice(draft));
+      draftHtml = `
+        <div class="card card--ai" id="draftCard">
+          <div class="draft-header">
+            <div class="draft-icon">\u2605</div>
+            <span class="draft-label">AI DRAFT</span>
+            <span class="draft-provider">${providerName}</span>
+          </div>
+          <div class="draft-body" id="draftBody">${draftText}</div>
+          <div class="draft-actions" id="draftActions">
+            <button class="btn btn--primary-ai btn--sm" data-action="send-draft" id="sendDraftBtn">Send Draft</button>
+            <button class="btn btn--secondary btn--sm" data-action="edit-draft">Edit</button>
+            <button class="btn btn--ghost btn--sm" data-action="regenerate">Regenerate</button>
+          </div>
+        </div>`;
+    }
+
+    // ── Build full reader HTML ──────────────────────────────────────────────
+    const html = `
+      <div class="reader-header">
+        <div class="reader-header__top">
+          <div class="avatar avatar--lg" style="background: ${avColor.bg}; color: ${avColor.fg}">${this.escapeHtml(senderInitials)}</div>
+          <div class="reader-header__meta">
+            <div class="reader-header__subject">${this.escapeHtml(subject)}</div>
+            <div class="reader-header__sender">${this.escapeHtml(sender)} &middot; ${this.escapeHtml(senderEmail)} &middot; ${this.escapeHtml(relativeTime(isoTimestamp))}</div>
+          </div>
+          <div class="reader-header__badges">
+            <span class="badge" style="background: ${catColor.bg}; color: ${catColor.fg}">${this.escapeHtml(category)}</span>
+            ${tagPillsHtml}
+            <span class="badge reader-score-badge" style="background: ${heatColor}; color: #fff" id="scoreToggle">Score: ${score}</span>
+          </div>
+        </div>
+
+        <div class="reader-score-detail" id="scoreDetail" hidden>
+          <div class="section-label">Scoring Details</div>
+          <div><strong>Urgency:</strong> ${urgency}</div>
+          <div><strong>Action:</strong> ${recommendedAction}</div>
+          <div><strong>Reasons:</strong></div>
+          <ul>${reasonsHtml}</ul>
+        </div>
+
+        <div class="reader-actions">
+          <button class="btn btn--secondary btn--sm" data-action="reply">Reply</button>
+          <button class="btn btn--secondary btn--sm" data-action="pin">${isPinned ? 'Unpin' : 'Pin'}</button>
+          <button class="btn btn--secondary btn--sm" data-action="move" id="moveToBtn" style="position: relative;">Move to\u2026</button>
+          <button class="btn btn--secondary btn--sm" data-action="archive">Archive</button>
+          <button class="btn btn--secondary btn--sm" data-action="done">${isDone ? 'Undo Done' : 'Done'}</button>
+          <button class="btn btn--danger btn--sm" data-action="delete" style="margin-left: auto;">Delete</button>
+        </div>
+      </div>
+
+      <div class="reader-body">${this.escapeHtml(String(item.body || item.preview || 'No content available.'))}</div>
+
+      ${draftHtml}
+    `;
+
+    readerPane.innerHTML = html;
+
+    // ── Mobile back button (must be after innerHTML) ──────────────────────
     if (isMobileReaderViewport()) {
       const backButton = document.createElement('button');
       backButton.type = 'button';
@@ -1166,20 +1189,333 @@ class DashboardClient {
       backButton.addEventListener('click', () => {
         this.closeMobileReader();
       });
-      readerPane.appendChild(backButton);
+      readerPane.prepend(backButton);
     }
 
-    const subject = document.createElement('h3');
-    subject.className = 'reader-subject';
-    subject.textContent = String(item.subject || 'No subject');
+    // ── Wire up action buttons ──────────────────────────────────────────────
+    this._wireReaderActions(item, itemId, readerPane);
+  }
 
-    const metadata = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
+  _wireReaderActions(item, itemId, readerPane) {
+    // Score toggle
+    const scoreToggle = readerPane.querySelector('#scoreToggle');
+    const scoreDetail = readerPane.querySelector('#scoreDetail');
+    if (scoreToggle && scoreDetail) {
+      scoreToggle.addEventListener('click', () => {
+        scoreDetail.hidden = !scoreDetail.hidden;
+      });
+    }
 
-    const body = document.createElement('div');
-    body.className = 'reader-body';
-    body.textContent = String(item.body || item.preview || 'No content available.');
+    // Action buttons via delegation
+    readerPane.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const action = e.currentTarget.dataset.action;
+        switch (action) {
+          case 'reply':
+            this._handleReaderReply(item, itemId);
+            break;
+          case 'pin':
+            this._handleEmailPin(item, itemId);
+            break;
+          case 'archive':
+            this._handleReaderArchive(itemId);
+            break;
+          case 'done':
+            this._handleEmailDone(item, itemId);
+            break;
+          case 'delete':
+            this._handleReaderDelete(itemId);
+            break;
+          case 'move':
+            this._handleReaderMove(item, itemId, e.currentTarget);
+            break;
+          case 'send-draft':
+            this._handleSendDraft(item, itemId, e.currentTarget);
+            break;
+          case 'edit-draft':
+            this._handleEditDraft(item, itemId);
+            break;
+          case 'regenerate':
+            this._handleRegenerateDraft(item, itemId);
+            break;
+          case 'save-draft':
+            this._handleSaveDraft(item, itemId);
+            break;
+          case 'cancel-edit':
+            this.renderReaderPane(item);
+            break;
+        }
+      });
+    });
+  }
 
-    readerPane.append(subject, metadata, body);
+  // ── Reader action handlers ──────────────────────────────────────────────
+  _handleReaderReply(item, itemId) {
+    // Generate AI draft
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.draft) {
+          item.draft = data.draft;
+          this.renderReaderPane(item);
+        }
+      })
+      .catch((err) => console.error('Failed to generate draft:', err));
+  }
+
+  _handleReaderArchive(itemId) {
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== itemId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+        }
+      })
+      .catch((err) => alert('Archive failed: ' + err.message));
+  }
+
+  _handleReaderDelete(itemId) {
+    if (!confirm('Delete this email permanently?')) return;
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== itemId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+        }
+      })
+      .catch((err) => alert('Delete failed: ' + err.message));
+  }
+
+  // ── Inline draft editing ──────────────────────────────────────────────────
+  _handleEditDraft(item, itemId) {
+    const draftCard = document.getElementById('draftCard');
+    if (!draftCard) return;
+    const draft = item.draft || {};
+    const draftSubject = String(draft.subject || item.subject || '');
+    const draftBody = String(draft.body || draft.text || '');
+
+    const draftBodyEl = document.getElementById('draftBody');
+    const draftActionsEl = document.getElementById('draftActions');
+    if (!draftBodyEl || !draftActionsEl) return;
+
+    // Insert subject input before body
+    const subjectInput = document.createElement('input');
+    subjectInput.className = 'form-input draft-edit-subject';
+    subjectInput.id = 'draftEditSubject';
+    subjectInput.value = draftSubject;
+    draftBodyEl.parentNode.insertBefore(subjectInput, draftBodyEl);
+
+    // Replace body with textarea
+    const textarea = document.createElement('textarea');
+    textarea.className = 'form-textarea';
+    textarea.id = 'draftEditBody';
+    textarea.value = draftBody;
+    textarea.rows = calculateDraftEditorRows(draftBody);
+    draftBodyEl.replaceWith(textarea);
+
+    // Replace action buttons
+    draftActionsEl.innerHTML = `
+      <button class="btn btn--primary btn--sm" data-action="save-draft">Save</button>
+      <button class="btn btn--ghost btn--sm" data-action="cancel-edit">Cancel</button>
+    `;
+
+    // Wire up new buttons
+    draftActionsEl.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const action = e.currentTarget.dataset.action;
+        if (action === 'save-draft') {
+          this._handleSaveDraft(item, itemId);
+        } else if (action === 'cancel-edit') {
+          this.renderReaderPane(item);
+        }
+      });
+    });
+
+    textarea.focus();
+  }
+
+  _handleSaveDraft(item, itemId) {
+    const subjectInput = document.getElementById('draftEditSubject');
+    const bodyTextarea = document.getElementById('draftEditBody');
+    if (!subjectInput || !bodyTextarea) return;
+
+    const updatedSubject = subjectInput.value;
+    const updatedBody = bodyTextarea.value;
+
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: updatedSubject, body: updatedBody }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success || data.draft) {
+          if (!item.draft) item.draft = {};
+          item.draft.subject = updatedSubject;
+          item.draft.body = updatedBody;
+        }
+        this.renderReaderPane(item);
+      })
+      .catch((err) => {
+        console.error('Failed to save draft:', err);
+        this.renderReaderPane(item);
+      });
+  }
+
+  _handleSendDraft(item, itemId, btn) {
+    if (btn.dataset.confirming === 'true') {
+      // Second click during confirm window — actually send
+      btn.textContent = 'Sending...';
+      btn.disabled = true;
+      fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            delete item.draft;
+            this.renderReaderPane(item);
+          } else {
+            alert('Send failed: ' + (data.error || 'Unknown error'));
+            btn.textContent = 'Send Draft';
+            btn.disabled = false;
+            btn.dataset.confirming = 'false';
+          }
+        })
+        .catch((err) => {
+          alert('Send failed: ' + err.message);
+          btn.textContent = 'Send Draft';
+          btn.disabled = false;
+          btn.dataset.confirming = 'false';
+        });
+      return;
+    }
+
+    // First click — enter confirm state
+    btn.dataset.confirming = 'true';
+    btn.textContent = 'Confirm Send?';
+    btn.classList.add('btn--confirm');
+
+    setTimeout(() => {
+      if (btn.dataset.confirming === 'true') {
+        btn.textContent = 'Send Draft';
+        btn.classList.remove('btn--confirm');
+        btn.dataset.confirming = 'false';
+      }
+    }, 3000);
+  }
+
+  _handleRegenerateDraft(item, itemId) {
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.draft) {
+          item.draft = data.draft;
+          this.renderReaderPane(item);
+        }
+      })
+      .catch((err) => console.error('Failed to regenerate draft:', err));
+  }
+
+  // ── Move to folder ──────────────────────────────────────────────────────
+  _handleReaderMove(item, itemId, btnEl) {
+    // Close existing popover if open
+    const existing = document.getElementById('folderPopover');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const popover = document.createElement('div');
+    popover.className = 'folder-popover';
+    popover.id = 'folderPopover';
+    popover.innerHTML = '<div class="section-label">Move to folder</div><div class="folder-popover__list" id="folderList">Loading...</div>';
+    btnEl.appendChild(popover);
+
+    // Close on outside click
+    const closePopover = (e) => {
+      if (!popover.contains(e.target) && e.target !== btnEl) {
+        popover.remove();
+        document.removeEventListener('click', closePopover);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closePopover), 0);
+
+    // Fetch folders (with cache)
+    const renderFolders = (folders) => {
+      const listEl = document.getElementById('folderList');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      folders.forEach((folder) => {
+        const btn = document.createElement('button');
+        btn.className = 'folder-popover__item';
+        btn.dataset.folderId = folder.id;
+        btn.textContent = folder.displayName;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._moveEmailToFolder(itemId, folder.id, item);
+          popover.remove();
+          document.removeEventListener('click', closePopover);
+        });
+        listEl.appendChild(btn);
+      });
+    };
+
+    if (this.folderCache) {
+      renderFolders(this.folderCache);
+    } else {
+      fetch('/api/graph/mail-folders')
+        .then((res) => res.json())
+        .then((data) => {
+          const folders = Array.isArray(data.folders) ? data.folders : [];
+          this.folderCache = folders;
+          renderFolders(folders);
+        })
+        .catch((err) => {
+          const listEl = document.getElementById('folderList');
+          if (listEl) listEl.textContent = 'Failed to load folders';
+          console.error('Folder fetch error:', err);
+        });
+    }
+  }
+
+  _moveEmailToFolder(emailId, folderId, item) {
+    fetch(`/api/emails/${encodeURIComponent(emailId)}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success || !data.error) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== emailId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+        } else {
+          alert('Move failed: ' + (data.error || 'Unknown error'));
+        }
+      })
+      .catch((err) => alert('Move failed: ' + err.message));
   }
 
   openMobileReader(listEl) {
