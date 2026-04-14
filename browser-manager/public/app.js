@@ -235,12 +235,6 @@ class DashboardClient {
     selectEl.value = currentSelection;
   }
 
-  async openDraftEditorModal({ subject, body, providerNotice }) {
-    // Stub: draft editing is now inline in the reader pane.
-    // Return the values unchanged so callers still work.
-    return { subject: String(subject || ''), body: String(body || '') };
-  }
-
   // ── Logs rendering and filtering ──────────────────────────────────────────
   computeLogSummary() {
     const today = new Date().toDateString();
