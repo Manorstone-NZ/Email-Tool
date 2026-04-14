@@ -244,6 +244,40 @@ class DashboardServer {
       });
     });
 
+    // Pattern preview — returns match counts for a categorization rule/label
+    this.app.get('/api/categorization/preview', (req, res) => {
+      const { type, value } = req.query;
+      if (!type || !value) return res.json({ matchCount: 0, matchedIds: [] });
+
+      const items = (this.manager && this.manager.emailTriage)
+        ? this.manager.emailTriage.getLastResult()
+        : [];
+      const matchedIds = [];
+
+      for (const item of items) {
+        const email = item.email || item;
+        let matches = false;
+
+        if (type === 'sender_domain') {
+          matches = (email.from || email.senderEmail || '').toLowerCase().includes('@' + value.toLowerCase());
+        } else if (type === 'sender_email') {
+          matches = (email.from || email.senderEmail || '').toLowerCase() === value.toLowerCase();
+        } else if (type === 'subject_contains') {
+          matches = (email.subject || '').toLowerCase().includes(value.toLowerCase());
+        } else if (type === 'subject_exact') {
+          matches = (email.subject || '').toLowerCase() === value.toLowerCase();
+        } else if (type === 'topic_label') {
+          const patterns = value.split(',').map(p => p.trim().toLowerCase());
+          const text = ((email.subject || '') + ' ' + (email.bodyPreview || '')).toLowerCase();
+          matches = patterns.some(p => text.includes(p));
+        }
+
+        if (matches) matchedIds.push(item.id || email.id || email.messageId);
+      }
+
+      res.json({ matchCount: matchedIds.length, matchedIds });
+    });
+
     this.app.get('/api/settings', (req, res) => {
       res.json({ success: true, settings: loadSettings() });
     });

@@ -638,14 +638,422 @@ class DashboardClient {
     `;
   }
 
-  // ── Categorization tab (placeholder for Task 8) ───────────────────────────
+  // ── Categorization tab ─────────────────────────────────────────────────────
   _renderCategorizationTab(_s) {
-    return `
-      <div class="card">
-        <div class="card__title">Categorization</div>
-        <p style="font-size:0.8125rem;color:var(--text-muted);">Category, topic label, and custom rule configuration coming in next update.</p>
+    // Load categorization settings asynchronously then render
+    this._loadAndRenderCategorization();
+    return '<div id="categorizationBuilder"><div style="padding:24px;color:var(--text-muted);font-size:0.8125rem;">Loading categorization settings...</div></div>';
+  }
+
+  async _loadAndRenderCategorization() {
+    const container = document.getElementById('categorizationBuilder');
+    if (!container) return;
+
+    try {
+      const resp = await fetch('/api/settings/categorisation');
+      this._catSettings = await resp.json();
+    } catch {
+      this._catSettings = { categories: {}, topicLabels: [], customRules: [], topicLabelsGloballyEnabled: true };
+    }
+
+    const cs = this._catSettings;
+    const catColor = (name) => {
+      if (typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor) {
+        return EmailHelpers.getCategoryColor(name);
+      }
+      return { fg: '#777', bg: '#f5f3f0', border: '#e0dbd4', accent: '#999' };
+    };
+
+    // Map canonical keys to display names
+    const CAT_DISPLAY = {
+      todo: 'Needs Reply',
+      to_follow_up: 'Waiting on Others',
+      fyi: 'FYI',
+      notification: 'Notification',
+      marketing: 'Marketing',
+    };
+    const CAT_DESCRIPTIONS = {
+      todo: 'Emails that need your direct reply or action',
+      to_follow_up: 'Waiting for someone else to respond',
+      fyi: 'Informational emails, no action needed',
+      notification: 'Automated notifications and alerts',
+      marketing: 'Newsletters, promotions, and marketing',
+    };
+    const CANONICAL_CATEGORIES = ['todo', 'to_follow_up', 'fyi', 'notification', 'marketing'];
+
+    // Count emails per display category
+    let emailCounts = {};
+    if (typeof EmailHelpers !== 'undefined' && EmailHelpers.countEmailBuckets && Array.isArray(this.triageItems)) {
+      const buckets = EmailHelpers.countEmailBuckets(this.triageItems, {});
+      emailCounts = buckets.categories || {};
+    }
+
+    // ── Category cards ──────────────────────────────────────────────────────
+    let html = '<div class="section-label">Categories</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:24px;">';
+    for (const catKey of CANONICAL_CATEGORIES) {
+      const displayName = CAT_DISPLAY[catKey];
+      const desc = CAT_DESCRIPTIONS[catKey];
+      const color = catColor(displayName);
+      const catConf = (cs.categories && cs.categories[catKey]) || {};
+      const enabled = catConf.enabled !== false;
+      const count = emailCounts[displayName] || 0;
+      html += `
+        <div class="card" style="border-left:3px solid ${color.accent};padding:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span class="card__title" style="margin:0;">${this._escapeHtml(displayName)}</span>
+            <label class="toggle"><input type="checkbox" ${enabled ? 'checked' : ''} data-cat-toggle="${catKey}"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+          </div>
+          <div class="card__description">${this._escapeHtml(desc)}</div>
+          <div style="font-size:1.25rem;font-weight:700;color:${color.accent};">${count}</div>
+          <div style="font-size:0.625rem;color:var(--text-muted);">emails in inbox</div>
+        </div>`;
+    }
+    html += '</div>';
+
+    // ── Topic Labels ────────────────────────────────────────────────────────
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span class="section-label" style="margin:0;">Topic Labels</span>
+        <button class="btn btn--primary-ai btn--sm" id="addLabelBtn">+ Add Label</button>
       </div>
-    `;
+      <div id="topicLabelsList">`;
+
+    const labels = cs.topicLabels || [];
+    if (labels.length === 0) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:0.8125rem;">No topic labels configured yet.</div>';
+    }
+    for (const label of labels) {
+      const mappedCatDisplay = CAT_DISPLAY[label.mapsToCategory] || label.mapsToCategory;
+      const color = catColor(mappedCatDisplay);
+      const patternsStr = (label.patterns || []).join(',');
+      html += `
+        <div class="card" style="display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:8px;" data-label-id="${this._escapeHtml(label.id || label.key)}">
+          <div style="width:36px;height:36px;background:${color.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="${color.fg}" stroke-width="2"><path d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/></svg>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:0.8125rem;">${this._escapeHtml(label.key)}</div>
+            <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">
+              ${(label.patterns || []).map(p => `<span class="pill pill--sm pill--ghost">${this._escapeHtml(p)}</span>`).join('')}
+            </div>
+          </div>
+          <span class="badge" style="background:${color.bg};color:${color.fg};">\u2192 ${this._escapeHtml(mappedCatDisplay)}</span>
+          <span style="font-size:0.6875rem;color:var(--status-success);font-weight:500;" class="label-match-count" data-patterns="${this._escapeHtml(patternsStr)}" data-type="topic_label">loading...</span>
+          <button class="btn btn--icon btn--ghost btn--sm edit-label-btn" data-label-key="${this._escapeHtml(label.key)}">&#9998;</button>
+        </div>`;
+    }
+    html += '</div>';
+
+    // ── Custom Rules ────────────────────────────────────────────────────────
+    const RULE_TYPE_TEXT = {
+      sender_email: 'sender email is',
+      sender_domain: 'sender domain is',
+      subject_contains: 'subject contains',
+      subject_exact: 'subject exactly matches',
+    };
+
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:24px;margin-bottom:12px;">
+        <span class="section-label" style="margin:0;">Custom Rules</span>
+        <button class="btn btn--primary-ai btn--sm" id="addRuleBtn">+ Add Rule</button>
+      </div>
+      <div id="customRulesList">`;
+
+    const rules = cs.customRules || [];
+    if (rules.length === 0) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:0.8125rem;">No custom rules configured yet.</div>';
+    }
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const actionDisplay = rule.action === 'skip_automation' ? 'Skip' : (CAT_DISPLAY[rule.action] || rule.action);
+      const actionColor = rule.action === 'skip_automation' ? { bg: 'var(--bg-muted)', fg: 'var(--text-muted)' } : catColor(actionDisplay);
+      html += `
+        <div class="card" style="display:flex;align-items:center;gap:10px;padding:14px;margin-bottom:8px;" data-rule-index="${i}">
+          <span class="badge" style="background:var(--bg-muted);color:var(--accent-brand);">IF</span>
+          <span style="font-size:0.75rem;color:var(--text-tertiary);">${RULE_TYPE_TEXT[rule.type] || rule.type}</span>
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);background:var(--bg-rail);padding:4px 10px;border-radius:8px;">${this._escapeHtml(rule.value)}</span>
+          <span class="badge" style="background:var(--bg-muted);color:var(--accent-brand);">THEN</span>
+          <span class="badge" style="background:${actionColor.bg};color:${actionColor.fg};">${this._escapeHtml(actionDisplay)}</span>
+          <span style="font-size:0.6875rem;color:var(--status-success);font-weight:500;margin-left:auto;" class="rule-match-count" data-type="${this._escapeHtml(rule.type)}" data-value="${this._escapeHtml(rule.value)}">loading...</span>
+          <button class="btn btn--icon btn--ghost btn--sm edit-rule-btn" data-rule-index="${i}">&#9998;</button>
+        </div>`;
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // ── Wire up event handlers ──────────────────────────────────────────────
+    this._wireCategorizationEvents(container, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+
+    // ── Fetch match counts ──────────────────────────────────────────────────
+    this._fetchCategorizationMatchCounts();
+  }
+
+  _wireCategorizationEvents(container, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT) {
+    // Category enable/disable toggles
+    container.querySelectorAll('[data-cat-toggle]').forEach(toggle => {
+      toggle.addEventListener('change', async () => {
+        const catKey = toggle.dataset.catToggle;
+        if (!cs.categories[catKey]) cs.categories[catKey] = {};
+        cs.categories[catKey].enabled = toggle.checked;
+        await this._saveCategorizationSettings(cs);
+      });
+    });
+
+    // Add label button
+    const addLabelBtn = document.getElementById('addLabelBtn');
+    if (addLabelBtn) {
+      addLabelBtn.addEventListener('click', () => {
+        this._showLabelEditor(null, cs, CANONICAL_CATEGORIES, CAT_DISPLAY);
+      });
+    }
+
+    // Edit label buttons
+    container.querySelectorAll('.edit-label-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.labelKey;
+        const label = (cs.topicLabels || []).find(l => l.key === key);
+        if (label) this._showLabelEditor(label, cs, CANONICAL_CATEGORIES, CAT_DISPLAY);
+      });
+    });
+
+    // Add rule button
+    const addRuleBtn = document.getElementById('addRuleBtn');
+    if (addRuleBtn) {
+      addRuleBtn.addEventListener('click', () => {
+        this._showRuleEditor(null, -1, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+      });
+    }
+
+    // Edit rule buttons
+    container.querySelectorAll('.edit-rule-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.ruleIndex, 10);
+        const rule = (cs.customRules || [])[idx];
+        if (rule) this._showRuleEditor(rule, idx, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+      });
+    });
+  }
+
+  // ── Label inline editor ─────────────────────────────────────────────────
+  _showLabelEditor(existingLabel, cs, CANONICAL_CATEGORIES, CAT_DISPLAY) {
+    const listEl = document.getElementById('topicLabelsList');
+    if (!listEl) return;
+
+    const isNew = !existingLabel;
+    const label = existingLabel || { key: '', patterns: [], mapsToCategory: 'fyi', enabled: true };
+
+    // Remove any existing editor
+    const old = document.getElementById('labelEditorInline');
+    if (old) old.remove();
+
+    const editor = document.createElement('div');
+    editor.id = 'labelEditorInline';
+    editor.className = 'card';
+    editor.style.cssText = 'padding:16px;margin-bottom:8px;border:1px solid var(--accent-brand);';
+
+    const catOptions = CANONICAL_CATEGORIES.map(k =>
+      `<option value="${k}" ${k === label.mapsToCategory ? 'selected' : ''}>${this._escapeHtml(CAT_DISPLAY[k])}</option>`
+    ).join('');
+
+    editor.innerHTML = `
+      <div style="font-weight:600;font-size:0.8125rem;margin-bottom:10px;">${isNew ? 'New Topic Label' : 'Edit Topic Label'}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Label Key</label>
+          <input type="text" id="labelEdKey" class="form-input" value="${this._escapeHtml(label.key)}" placeholder="e.g. invoices">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Maps to Category</label>
+          <select id="labelEdCategory" class="form-select">${catOptions}</select>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label class="form-label" style="font-size:0.6875rem;">Patterns (comma-separated)</label>
+        <input type="text" id="labelEdPatterns" class="form-input" value="${this._escapeHtml(label.patterns.join(', '))}" placeholder="invoice, receipt, payment">
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn--primary-ai btn--sm" id="labelEdSave">Save</button>
+        <button class="btn btn--ghost btn--sm" id="labelEdCancel">Cancel</button>
+        ${!isNew ? '<button class="btn btn--ghost btn--sm" id="labelEdDelete" style="margin-left:auto;color:var(--status-error);">Delete</button>' : ''}
+      </div>`;
+
+    if (isNew) {
+      listEl.prepend(editor);
+    } else {
+      const card = listEl.querySelector(`[data-label-id="${label.id || label.key}"]`);
+      if (card) card.replaceWith(editor);
+      else listEl.prepend(editor);
+    }
+
+    document.getElementById('labelEdCancel').addEventListener('click', () => {
+      this._loadAndRenderCategorization();
+    });
+
+    document.getElementById('labelEdSave').addEventListener('click', async () => {
+      const key = document.getElementById('labelEdKey').value.trim();
+      const patterns = document.getElementById('labelEdPatterns').value.split(',').map(p => p.trim()).filter(Boolean);
+      const mapsToCategory = document.getElementById('labelEdCategory').value;
+
+      if (!key || patterns.length === 0) {
+        alert('Label key and at least one pattern are required.');
+        return;
+      }
+
+      if (isNew) {
+        cs.topicLabels = cs.topicLabels || [];
+        cs.topicLabels.push({ id: 'label_' + Date.now(), key, patterns, mapsToCategory, enabled: true });
+      } else {
+        const idx = cs.topicLabels.findIndex(l => l.key === label.key);
+        if (idx >= 0) {
+          cs.topicLabels[idx] = { ...cs.topicLabels[idx], key, patterns, mapsToCategory };
+        }
+      }
+
+      await this._saveCategorizationSettings(cs);
+      this._loadAndRenderCategorization();
+    });
+
+    const delBtn = document.getElementById('labelEdDelete');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        cs.topicLabels = (cs.topicLabels || []).filter(l => l.key !== label.key);
+        await this._saveCategorizationSettings(cs);
+        this._loadAndRenderCategorization();
+      });
+    }
+  }
+
+  // ── Rule inline editor ──────────────────────────────────────────────────
+  _showRuleEditor(existingRule, ruleIndex, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT) {
+    const listEl = document.getElementById('customRulesList');
+    if (!listEl) return;
+
+    const isNew = !existingRule;
+    const rule = existingRule || { id: '', type: 'sender_domain', value: '', action: 'fyi', enabled: true };
+
+    const old = document.getElementById('ruleEditorInline');
+    if (old) old.remove();
+
+    const editor = document.createElement('div');
+    editor.id = 'ruleEditorInline';
+    editor.className = 'card';
+    editor.style.cssText = 'padding:16px;margin-bottom:8px;border:1px solid var(--accent-brand);';
+
+    const typeOptions = Object.entries(RULE_TYPE_TEXT).map(([val, text]) =>
+      `<option value="${val}" ${val === rule.type ? 'selected' : ''}>${this._escapeHtml(text)}</option>`
+    ).join('');
+
+    const actionOptions = CANONICAL_CATEGORIES.map(k =>
+      `<option value="${k}" ${k === rule.action ? 'selected' : ''}>${this._escapeHtml(CAT_DISPLAY[k])}</option>`
+    ).join('') + `<option value="skip_automation" ${rule.action === 'skip_automation' ? 'selected' : ''}>Skip automation</option>`;
+
+    editor.innerHTML = `
+      <div style="font-weight:600;font-size:0.8125rem;margin-bottom:10px;">${isNew ? 'New Custom Rule' : 'Edit Custom Rule'}</div>
+      <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px;margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Condition Type</label>
+          <select id="ruleEdType" class="form-select">${typeOptions}</select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Value</label>
+          <input type="text" id="ruleEdValue" class="form-input" value="${this._escapeHtml(rule.value)}" placeholder="e.g. example.com">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Action</label>
+          <select id="ruleEdAction" class="form-select">${actionOptions}</select>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn--primary-ai btn--sm" id="ruleEdSave">Save</button>
+        <button class="btn btn--ghost btn--sm" id="ruleEdCancel">Cancel</button>
+        ${!isNew ? '<button class="btn btn--ghost btn--sm" id="ruleEdDelete" style="margin-left:auto;color:var(--status-error);">Delete</button>' : ''}
+      </div>`;
+
+    if (isNew) {
+      listEl.prepend(editor);
+    } else {
+      const card = listEl.querySelector(`[data-rule-index="${ruleIndex}"]`);
+      if (card) card.replaceWith(editor);
+      else listEl.prepend(editor);
+    }
+
+    document.getElementById('ruleEdCancel').addEventListener('click', () => {
+      this._loadAndRenderCategorization();
+    });
+
+    document.getElementById('ruleEdSave').addEventListener('click', async () => {
+      const type = document.getElementById('ruleEdType').value;
+      const value = document.getElementById('ruleEdValue').value.trim();
+      const action = document.getElementById('ruleEdAction').value;
+
+      if (!value) {
+        alert('Value is required.');
+        return;
+      }
+
+      if (isNew) {
+        cs.customRules = cs.customRules || [];
+        cs.customRules.push({ id: 'rule_' + Date.now(), type, value, action, enabled: true });
+      } else {
+        cs.customRules[ruleIndex] = { ...cs.customRules[ruleIndex], type, value, action };
+      }
+
+      await this._saveCategorizationSettings(cs);
+      this._loadAndRenderCategorization();
+    });
+
+    const delBtn = document.getElementById('ruleEdDelete');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        cs.customRules.splice(ruleIndex, 1);
+        await this._saveCategorizationSettings(cs);
+        this._loadAndRenderCategorization();
+      });
+    }
+  }
+
+  // ── Save categorization settings ──────────────────────────────────────────
+  async _saveCategorizationSettings(settings) {
+    try {
+      const resp = await fetch('/api/settings/categorisation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await resp.json();
+      if (!data.success) throw new Error(data.error || 'Save failed');
+      this._catSettings = data.settings || settings;
+    } catch (e) {
+      console.error('Save categorization settings error:', e);
+      alert('Failed to save categorization settings: ' + e.message);
+    }
+  }
+
+  // ── Fetch match counts for labels and rules ───────────────────────────────
+  async _fetchCategorizationMatchCounts() {
+    const labelEls = document.querySelectorAll('.label-match-count');
+    for (const el of labelEls) {
+      const patterns = el.dataset.patterns;
+      const type = el.dataset.type;
+      try {
+        const resp = await fetch(`/api/categorization/preview?type=${encodeURIComponent(type)}&value=${encodeURIComponent(patterns)}`);
+        const data = await resp.json();
+        el.textContent = `${data.matchCount} match${data.matchCount !== 1 ? 'es' : ''}`;
+      } catch { el.textContent = '\u2014'; }
+    }
+
+    const ruleEls = document.querySelectorAll('.rule-match-count');
+    for (const el of ruleEls) {
+      const type = el.dataset.type;
+      const value = el.dataset.value;
+      try {
+        const resp = await fetch(`/api/categorization/preview?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`);
+        const data = await resp.json();
+        el.textContent = `${data.matchCount} match${data.matchCount !== 1 ? 'es' : ''}`;
+      } catch { el.textContent = '\u2014'; }
+    }
   }
 
   // ── Advanced tab ──────────────────────────────────────────────────────────
