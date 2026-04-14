@@ -10,7 +10,12 @@ const {
   countEmailBuckets,
   getCategoryColor,
   getPrioritizedReaderMetadata,
+  avatarColor,
+  scoreToHeatColor,
+  groupByPriorityTier,
 } = require('../public/email-helpers');
+
+const { AVATAR_PALETTE } = require('../public/portal-constants');
 
 test('deriveRecommendedAction falls back to Review', () => {
   expect(deriveRecommendedAction({ action: 'Weird Value' })).toBe('Review');
@@ -124,9 +129,9 @@ test('countEmailBuckets computes counts after search scope', () => {
 });
 
 test('uses design-system category colors, not backend tag values', () => {
-  expect(getCategoryColor('Needs Reply')).toBe('#2f6f4f');
-  expect(getCategoryColor('Waiting on Others')).toBe('#8b6a2f');
-  expect(getCategoryColor('FYI')).toBe('#4d5f7a');
+  expect(getCategoryColor('Needs Reply')).toMatchObject({ fg: '#9b3c3c', accent: '#c0564a' });
+  expect(getCategoryColor('Waiting on Others')).toMatchObject({ fg: '#8b6a2f', accent: '#b8860b' });
+  expect(getCategoryColor('FYI')).toMatchObject({ fg: '#4a6380', accent: '#4a6380' });
 });
 
 test('truncates lower-priority metadata before category and recommended action', () => {
@@ -139,4 +144,52 @@ test('truncates lower-priority metadata before category and recommended action',
   }, { maxEntries: 2 });
 
   expect(metadata.map((entry) => entry.key)).toEqual(['category', 'recommendedAction']);
+});
+
+describe('avatarColor', () => {
+  it('returns a palette entry for a name', () => {
+    const result = avatarColor('Sarah Chen');
+    expect(result).toHaveProperty('bg');
+    expect(result).toHaveProperty('fg');
+  });
+  it('returns consistent color for same name', () => {
+    expect(avatarColor('Sarah Chen')).toEqual(avatarColor('Sarah Chen'));
+  });
+  it('handles empty string', () => {
+    const result = avatarColor('');
+    expect(AVATAR_PALETTE).toContainEqual(result);
+  });
+});
+
+describe('scoreToHeatColor', () => {
+  it('returns hot color for score >= 80', () => {
+    expect(scoreToHeatColor(85)).toBe('#c0564a');
+  });
+  it('returns warm color for score 60-79', () => {
+    expect(scoreToHeatColor(65)).toBe('#d4a030');
+  });
+  it('returns cool color for low scores', () => {
+    expect(scoreToHeatColor(25)).toBe('#e0dbd4');
+  });
+});
+
+describe('groupByPriorityTier', () => {
+  it('groups items into tiers', () => {
+    const items = [
+      { urgency: 'high', score: 85 },
+      { urgency: 'medium', score: 55 },
+      { urgency: 'low', score: 30 },
+    ];
+    const groups = groupByPriorityTier(items);
+    expect(groups[0].key).toBe('act-now');
+    expect(groups[0].items).toHaveLength(1);
+    expect(groups[1].key).toBe('review');
+    expect(groups[2].key).toBe('low');
+  });
+  it('omits empty tiers', () => {
+    const items = [{ urgency: 'low', score: 30 }];
+    const groups = groupByPriorityTier(items);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('low');
+  });
 });

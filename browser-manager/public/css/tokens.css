@@ -1,0 +1,71 @@
+:root {
+  /* Surfaces */
+  --bg-canvas: #fafaf8;
+  --bg-surface: #ffffff;
+  --bg-surface-warm: #faf8f5;
+  --bg-rail: #f5f3f0;
+  --bg-muted: #ebe6df;
+
+  /* Borders */
+  --border-default: #e8e5e0;
+  --border-subtle: #ece8e3;
+  --border-input: #e0dbd4;
+
+  /* Text */
+  --text-primary: #1a1a1a;
+  --text-secondary: #444444;
+  --text-tertiary: #777777;
+  --text-muted: #a09890;
+
+  /* Category accents — foreground */
+  --cat-needs-reply-fg: #9b3c3c;
+  --cat-waiting-fg: #8b6a2f;
+  --cat-fyi-fg: #4a6380;
+  --cat-notification-fg: #777060;
+  --cat-marketing-fg: #7a6088;
+
+  /* Category accents — background */
+  --cat-needs-reply-bg: #fef0f0;
+  --cat-waiting-bg: #fef8ec;
+  --cat-fyi-bg: #eef3f8;
+  --cat-notification-bg: #f0f0ec;
+  --cat-marketing-bg: #f5f0f8;
+
+  /* Category accents — border */
+  --cat-needs-reply-border: #f5d0d0;
+  --cat-waiting-border: #f0e0c0;
+  --cat-fyi-border: #d4e0ec;
+  --cat-notification-border: #e0e0d8;
+  --cat-marketing-border: #e0d8e8;
+
+  /* Category left-border accents (stronger) */
+  --cat-needs-reply-accent: #c0564a;
+  --cat-waiting-accent: #b8860b;
+  --cat-fyi-accent: #4a6380;
+  --cat-notification-accent: #777060;
+  --cat-marketing-accent: #7a6088;
+
+  /* Score heat gradient */
+  --score-hot: #c0564a;
+  --score-warm: #d4a030;
+  --score-mild: #d4a574;
+  --score-cool: #e0dbd4;
+
+  /* Priority tier backgrounds */
+  --tier-act-now-bg: #fef0f0;
+  --tier-review-bg: #fef8ec;
+  --tier-low-bg: #f5f3f0;
+
+  /* Special */
+  --accent-ai: #d4a574;
+  --accent-brand: #5a4a38;
+  --status-success: #5a9a6a;
+  --status-warning: #d4a030;
+  --status-error: #c0564a;
+
+  /* Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-pill: 99px;
+}

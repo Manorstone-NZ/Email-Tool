@@ -1,0 +1,416 @@
+/* =============================================================
+   components.css — Reusable UI components
+   All values reference tokens from tokens.css
+   ============================================================= */
+
+/* ─────────────────────────────────────────────
+   1. PILL — Rounded filter / badge element
+   ───────────────────────────────────────────── */
+
+.pill {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-input);
+  color: var(--text-tertiary);
+  border-radius: var(--radius-pill);
+  padding: 5px 14px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.pill:hover {
+  background: var(--bg-rail);
+}
+
+.pill.is-active {
+  background: var(--accent-brand);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* Category variants */
+.pill--needs-reply {
+  background: var(--cat-needs-reply-bg);
+  color: var(--cat-needs-reply-fg);
+  border-color: var(--cat-needs-reply-border);
+}
+
+.pill--waiting {
+  background: var(--cat-waiting-bg);
+  color: var(--cat-waiting-fg);
+  border-color: var(--cat-waiting-border);
+}
+
+.pill--fyi {
+  background: var(--cat-fyi-bg);
+  color: var(--cat-fyi-fg);
+  border-color: var(--cat-fyi-border);
+}
+
+.pill--notification {
+  background: var(--cat-notification-bg);
+  color: var(--cat-notification-fg);
+  border-color: var(--cat-notification-border);
+}
+
+.pill--marketing {
+  background: var(--cat-marketing-bg);
+  color: var(--cat-marketing-fg);
+  border-color: var(--cat-marketing-border);
+}
+
+.pill-count {
+  opacity: 0.6;
+  margin-left: 2px;
+}
+
+.pill--sm {
+  font-size: 0.625rem;
+  padding: 1px 7px;
+}
+
+.pill--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.pill--ghost:hover {
+  background: var(--bg-rail);
+}
+
+
+/* ─────────────────────────────────────────────
+   2. BTN — Pill-shaped button
+   ───────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-pill);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 9px 22px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.btn--primary-ai {
+  background: var(--accent-ai);
+  color: #fff;
+}
+
+.btn--primary-ai:hover {
+  box-shadow: 0 4px 12px rgba(212, 165, 116, 0.4);
+}
+
+.btn--primary {
+  background: var(--accent-brand);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  box-shadow: 0 4px 12px rgba(90, 74, 56, 0.35);
+}
+
+.btn--secondary {
+  background: var(--bg-surface);
+  border-color: var(--border-input);
+  color: var(--accent-brand);
+}
+
+.btn--secondary:hover {
+  background: var(--bg-rail);
+}
+
+.btn--ghost {
+  background: var(--bg-surface);
+  border-color: var(--border-input);
+  color: var(--text-muted);
+}
+
+.btn--ghost:hover {
+  background: var(--bg-rail);
+}
+
+.btn--danger {
+  background: var(--bg-surface);
+  border-color: var(--cat-needs-reply-border);
+  color: var(--status-error);
+}
+
+.btn--danger:hover {
+  background: var(--cat-needs-reply-bg);
+}
+
+.btn--sm {
+  font-size: 0.75rem;
+  padding: 6px 14px;
+}
+
+.btn--icon {
+  padding: 6px;
+  width: 34px;
+  height: 34px;
+}
+
+
+/* ─────────────────────────────────────────────
+   3. CARD — White surface container
+   ───────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+}
+
+.card--category {
+  border-left: 3px solid; /* color set inline per category */
+}
+
+.card--ai {
+  background: var(--bg-surface-warm);
+  border-left: 3px solid var(--accent-ai);
+}
+
+
+/* ─────────────────────────────────────────────
+   4. BADGE — Small inline status label
+   ───────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.625rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+
+/* ─────────────────────────────────────────────
+   5. AVATAR — Circular sender initials
+   ───────────────────────────────────────────── */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.avatar--lg {
+  width: 40px;
+  height: 40px;
+  font-size: 0.875rem;
+}
+
+.avatar--md {
+  width: 36px;
+  height: 36px;
+  font-size: 0.8125rem;
+}
+
+.avatar--sm {
+  width: 28px;
+  height: 28px;
+  font-size: 0.625rem;
+}
+
+
+/* ─────────────────────────────────────────────
+   6. TOGGLE — Toggle switch (replaces checkbox)
+   ───────────────────────────────────────────── */
+
+label.toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+label.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: var(--border-input);
+  border-radius: 12px;
+  transition: background 0.2s;
+}
+
+label.toggle input:checked + .toggle-track {
+  background: var(--accent-ai);
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+label.toggle input:checked ~ .toggle-knob {
+  transform: translateX(20px);
+}
+
+
+/* ─────────────────────────────────────────────
+   7. FORM CONTROLS
+   ───────────────────────────────────────────── */
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  border: 1px solid var(--border-input);
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  border-color: var(--accent-ai);
+  box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.15);
+  outline: none;
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.45;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.form-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+
+/* ─────────────────────────────────────────────
+   8. TOAST — Notification bar
+   ───────────────────────────────────────────── */
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  animation: toast-in 0.3s ease;
+}
+
+.toast--warning {
+  background: var(--cat-waiting-bg);
+  color: var(--cat-waiting-fg);
+  border: 1px solid var(--cat-waiting-border);
+}
+
+.toast--success {
+  background: #edf7f0;
+  color: #3a7a4a;
+  border: 1px solid #c4e0cc;
+}
+
+.toast--error {
+  background: var(--cat-needs-reply-bg);
+  color: var(--cat-needs-reply-fg);
+  border: 1px solid var(--cat-needs-reply-border);
+}
+
+
+/* ─────────────────────────────────────────────
+   9. STATUS DOT — Connection indicator
+   ───────────────────────────────────────────── */
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--success {
+  background: var(--status-success);
+}
+
+.status-dot--warning {
+  background: var(--status-warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot--error {
+  background: var(--status-error);
+}
+
+
+/* ─────────────────────────────────────────────
+   10. SECTION LABEL — Uppercase section heading
+   ───────────────────────────────────────────── */
+
+.section-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}

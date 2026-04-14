@@ -118,6 +118,14 @@ function mergeEmailUiState(items, persisted) {
   });
 }
 
+function getGroupByPriority() {
+  try { return localStorage.getItem('portal.groupByPriority') !== 'false'; } catch { return true; }
+}
+
+function setGroupByPriority(value) {
+  try { localStorage.setItem('portal.groupByPriority', value ? 'true' : 'false'); } catch {}
+}
+
 const api = {
   normalizeRoute,
   readEmailUiState,
@@ -131,6 +139,8 @@ const api = {
   getCategorizationTab,
   setSettingsDirty,
   isSettingsDirty,
+  getGroupByPriority,
+  setGroupByPriority,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -11,7 +11,8 @@ class DashboardClient {
       search: '',
       category: null,  // null means 'All', or one of 'Needs Reply', 'Waiting on Others', 'FYI'
       state: null,     // null means 'All', or one of 'Flagged', 'Pinned', 'Done'
-      tag: null        // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
+      tag: null,       // null means no tag filter, or one of 'Approval', 'Vendor', 'Urgent'
+      tags: []         // array of selected tags from tag popover
     };
     this.selectedEmailId = null;
     this.mobileReaderOpen = false;
@@ -190,28 +191,18 @@ class DashboardClient {
       const res = await fetch('/api/settings');
       const data = await res.json();
       if (!data.success) return;
-      const s = data.settings;
-      this.fillSettingsForm(s);
-      await this.loadArchiveFolderOptions(s.archiveFolderId || '');
+      this._settingsData = data.settings || {};
+      this.renderSettingsTabs();
+      this.renderActiveSettingsTab();
+      await this.loadArchiveFolderOptions(this._settingsData.archiveFolderId || '');
     } catch (e) {
       console.error('Failed to load settings:', e);
     }
-
-    const panel = document.getElementById('settings-panel');
-    if (panel) {
-      const api = {
-        getSettings: () => fetch('/api/settings/categorisation').then(r => r.json()),
-        putSettings: (settings) => fetch('/api/settings/categorisation', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(settings),
-        }).then(r => r.json()),
-      };
-      await renderSettingsPanel(panel, api);
-    }
-
-    // Setup Graph Auth button after settings are loaded
     this.setupGraphAuthButton();
+    this.checkGraphTokenExpiry();
+    if (!this._graphExpiryInterval) {
+      this._graphExpiryInterval = setInterval(() => this.checkGraphTokenExpiry(), 60000);
+    }
   }
 
   async loadArchiveFolderOptions(selectedFolderId) {
@@ -244,193 +235,225 @@ class DashboardClient {
     selectEl.value = currentSelection;
   }
 
-  async openDraftEditorModal({ subject, body, providerNotice }) {
-    const modal = document.getElementById('draftEditorModal');
-    const subjectInput = document.getElementById('draftEditorSubject');
-    const bodyInput = document.getElementById('draftEditorBody');
-    const providerNoticeEl = document.getElementById('draftEditorProviderNotice');
-    const cancelBtn = document.getElementById('draftEditorCancel');
-    const saveBtn = document.getElementById('draftEditorSave');
+  // ── Logs rendering and filtering ──────────────────────────────────────────
+  computeLogSummary() {
+    const today = new Date().toDateString();
+    const todayLogs = this.logs.filter(l => new Date(l.timestamp).toDateString() === today);
+    return {
+      total: todayLogs.length,
+      errors: todayLogs.filter(l => /error|fail/i.test(l.action || l.type || '')).length,
+      drafts: todayLogs.filter(l => /draft/i.test(l.action || '')).length,
+      sent: todayLogs.filter(l => /send|sent/i.test(l.action || '')).length,
+    };
+  }
 
-    if (!modal || !subjectInput || !bodyInput || !providerNoticeEl || !cancelBtn || !saveBtn) {
-      const fallbackSubject = window.prompt(`Edit draft subject before approval:\n${providerNotice}`, String(subject || ''));
-      if (fallbackSubject === null) {
-        return null;
-      }
-      const fallbackBody = window.prompt(`Edit draft body before approval:\n${providerNotice}`, String(body || ''));
-      if (fallbackBody === null) {
-        return null;
-      }
-      return {
-        subject: fallbackSubject,
-        body: fallbackBody,
-      };
-    }
+  renderLogs() {
+    this._renderLogsSummary();
+    this._renderLogsFilters();
+    this._renderLogsEntries();
+    this._updateLogsLiveLabel();
+  }
 
-    providerNoticeEl.textContent = providerNotice;
-    subjectInput.value = String(subject || '');
-    bodyInput.value = String(body || '');
-    bodyInput.rows = calculateDraftEditorRows(bodyInput.value);
-    modal.hidden = false;
+  _updateLogsLiveLabel() {
+    const label = document.getElementById('logsLiveLabel');
+    if (!label) return;
+    label.textContent = 'Live';
+    label.className = `logs-live-label ${this.logsIsLive ? 'logs-live-label--on' : 'logs-live-label--off'}`;
+  }
 
-    return new Promise((resolve) => {
-      const cleanup = () => {
-        modal.hidden = true;
-        cancelBtn.removeEventListener('click', onCancel);
-        saveBtn.removeEventListener('click', onSave);
-        modal.removeEventListener('click', onBackdropClick);
-        document.removeEventListener('keydown', onKeyDown, true);
-      };
-
-      const onCancel = () => {
-        cleanup();
-        resolve(null);
-      };
-
-      const onSave = () => {
-        cleanup();
-        resolve({
-          subject: subjectInput.value,
-          body: bodyInput.value,
-        });
-      };
-
-      const onBackdropClick = (event) => {
-        if (event.target === modal) {
-          onCancel();
-        }
-      };
-
-      const onKeyDown = (event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          onCancel();
-          return;
-        }
-
-        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-          event.preventDefault();
-          onSave();
-        }
-      };
-
-      cancelBtn.addEventListener('click', onCancel);
-      saveBtn.addEventListener('click', onSave);
-      modal.addEventListener('click', onBackdropClick);
-      document.addEventListener('keydown', onKeyDown, true);
-
-      setTimeout(() => {
-        bodyInput.focus();
-        const cursor = bodyInput.value.length;
-        bodyInput.setSelectionRange(cursor, cursor);
-      }, 0);
+  _renderLogsSummary() {
+    const container = document.getElementById('logsSummary');
+    if (!container) return;
+    const s = this.computeLogSummary();
+    const stats = [
+      { count: s.total, label: 'Actions today', countClass: 'neutral', filterKey: 'all' },
+      { count: s.errors, label: 'Errors', countClass: 'error', filterKey: 'errors' },
+      { count: s.drafts, label: 'Drafts generated', countClass: 'draft', filterKey: 'drafts' },
+      { count: s.sent, label: 'Sent', countClass: 'success', filterKey: 'sent' },
+    ];
+    container.innerHTML = stats.map(stat => {
+      const isActive = this.logsFilterType === stat.filterKey;
+      return `<div class="logs-stat${isActive ? ' is-active' : ''}" data-filter="${this.escapeHtml(stat.filterKey)}">
+        <span class="logs-stat__count logs-stat__count--${stat.countClass}">${stat.count}</span>
+        <span class="logs-stat__label">${this.escapeHtml(stat.label)}</span>
+      </div>`;
+    }).join('');
+    container.querySelectorAll('.logs-stat').forEach(el => {
+      el.addEventListener('click', () => {
+        this.logsFilterType = el.dataset.filter;
+        this.renderLogs();
+      });
     });
   }
 
-  // ── Logs rendering and filtering ──────────────────────────────────────────
-  renderLogs() {
-    const tableBody = document.getElementById('logsTableBody');
-    const emptyState = document.getElementById('logsEmptyState');
-    const resultCount = document.getElementById('logsResultCount');
+  _renderLogsFilters() {
+    const container = document.getElementById('logsFilters');
+    if (!container) return;
+    const pills = [
+      { label: 'All', key: 'all' },
+      { label: 'Errors', key: 'errors' },
+      { label: 'Drafts', key: 'drafts' },
+      { label: 'Categorization', key: 'categorization' },
+      { label: 'Actions', key: 'actions' },
+    ];
+    const pillsHtml = pills.map(p => {
+      const isActive = this.logsFilterType === p.key;
+      return `<button type="button" class="pill${isActive ? ' is-active' : ''}" data-filter="${this.escapeHtml(p.key)}">${this.escapeHtml(p.label)}</button>`;
+    }).join('');
+    container.innerHTML = `${pillsHtml}
+      <div class="logs-search-wrap">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-width="1.5">
+          <circle cx="7" cy="7" r="5"/><path d="m11 11 3 3"/>
+        </svg>
+        <input type="search" id="logsSearchInput" class="logs-search-input" placeholder="Search…" value="${this.escapeHtml(this.logsFilterSearch || '')}">
+      </div>`;
+    container.querySelectorAll('.pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.logsFilterType = btn.dataset.filter;
+        this.renderLogs();
+      });
+    });
+    const searchInput = container.querySelector('#logsSearchInput');
+    if (searchInput) {
+      searchInput.addEventListener('input', e => {
+        this.logsFilterSearch = e.target.value;
+        this._renderLogsEntries();
+      });
+    }
+  }
 
-    if (!tableBody) return;
+  _getLogEntryType(log) {
+    const action = (log.action || '').toLowerCase();
+    const type = (log.type || '').toLowerCase();
+    if (/error|fail/i.test(action) || /error|fail/i.test(type)) return 'error';
+    if (/draft/i.test(action)) return 'draft';
+    if (/send|sent/i.test(action)) return 'success';
+    if (/categori|triage|classify/i.test(action) || type === 'categorization') return 'categorization';
+    return 'action';
+  }
 
-    // Build filter object for LogHelpers
-    const filters = {
-      search: this.logsFilterSearch,
-      type: this.logsFilterType === 'all' ? null : this.logsFilterType,
-      window: this.logsFilterWindow,
+  _getLogIconSvg(entryType) {
+    const icons = {
+      error: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#c0564a" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3M8 10.5v.5"/></svg>`,
+      draft: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#d4a574" stroke-width="1.5"><path d="M3 12l7-7 2 2-7 7H3v-2z"/></svg>`,
+      success: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#5a9a6a" stroke-width="1.5"><path d="M3 8l3.5 3.5L13 5"/></svg>`,
+      categorization: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4a6380" stroke-width="1.5"><rect x="3" y="3" width="4" height="4" rx="1"/><rect x="9" y="3" width="4" height="4" rx="1"/><rect x="3" y="9" width="4" height="4" rx="1"/><rect x="9" y="9" width="4" height="4" rx="1"/></svg>`,
+      action: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#777" stroke-width="1.5"><path d="M8 2v4M8 10v4M2 8h4M10 8h4"/></svg>`,
     };
+    return icons[entryType] || icons.action;
+  }
 
-    // Use LogHelpers.filterLogs if available
-    const filteredLogs = typeof LogHelpers !== 'undefined' && LogHelpers.filterLogs
-      ? LogHelpers.filterLogs(this.logs, filters, new Date())
+  _getLogStatusBadge(entryType) {
+    const map = {
+      error: `<span class="pill pill--sm" style="background:var(--cat-needs-reply-bg);color:var(--status-error);border-color:var(--cat-needs-reply-border);">Error</span>`,
+      draft: `<span class="pill pill--sm" style="background:var(--bg-surface-warm);color:var(--accent-ai);">Draft</span>`,
+      success: `<span class="pill pill--sm" style="background:#f0faf3;color:var(--status-success);">Sent</span>`,
+      categorization: `<span class="pill pill--sm" style="background:var(--cat-fyi-bg);color:var(--cat-fyi-fg);">Categorized</span>`,
+      action: `<span class="pill pill--sm" style="background:var(--bg-rail);color:var(--text-muted);">Action</span>`,
+    };
+    return map[entryType] || map.action;
+  }
+
+  _logsRelativeTime(timestamp) {
+    const now = Date.now();
+    const ts = new Date(timestamp || now).getTime();
+    const diffMs = now - ts;
+    if (diffMs < 0) return 'just now';
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  _filterLogsByType(logs, filterType) {
+    if (!filterType || filterType === 'all') return logs;
+    return logs.filter(log => {
+      const entryType = this._getLogEntryType(log);
+      if (filterType === 'errors') return entryType === 'error';
+      if (filterType === 'drafts') return entryType === 'draft';
+      if (filterType === 'sent') return entryType === 'success';
+      if (filterType === 'categorization') return entryType === 'categorization';
+      if (filterType === 'actions') return entryType === 'action';
+      return true;
+    });
+  }
+
+  _renderLogsEntries() {
+    const container = document.getElementById('logsEntries');
+    if (!container) return;
+
+    // Apply search filter via LogHelpers
+    const searchFilters = {
+      search: this.logsFilterSearch,
+      type: null,
+      window: 'all',
+    };
+    const searchFiltered = typeof LogHelpers !== 'undefined' && LogHelpers.filterLogs
+      ? LogHelpers.filterLogs(this.logs, searchFilters, new Date())
       : this.logs;
 
+    // Apply type filter
+    const typeFiltered = this._filterLogsByType(searchFiltered, this.logsFilterType);
+
     // Sort newest first
-    const sortedLogs = filteredLogs.slice().sort((a, b) => {
+    const sortedLogs = typeFiltered.slice().sort((a, b) => {
       const timeA = new Date(a.timestamp || 0).getTime();
       const timeB = new Date(b.timestamp || 0).getTime();
       return timeB - timeA;
     });
 
-    // Update result count
-    if (resultCount) {
-      resultCount.textContent = `${sortedLogs.length} result${sortedLogs.length !== 1 ? 's' : ''}`;
-    }
-
-    // Clear table
-    tableBody.innerHTML = '';
-
-    // Show/hide empty state
     if (sortedLogs.length === 0) {
-      if (emptyState) {
-        emptyState.hidden = false;
-        if (this.logsFilterSearch || this.logsFilterType !== 'all' || this.logsFilterWindow !== '15m') {
-          emptyState.textContent = 'No results match current filters.';
-        } else {
-          emptyState.textContent = 'No logs found.';
-        }
-      }
+      const hasFilter = this.logsFilterSearch || (this.logsFilterType && this.logsFilterType !== 'all');
+      container.innerHTML = `<div class="logs-empty">${hasFilter ? 'No results match current filters.' : 'No logs found.'}</div>`;
       return;
     }
 
-    if (emptyState) {
-      emptyState.hidden = true;
-    }
+    container.innerHTML = '';
 
-    // Render rows
     sortedLogs.forEach((log, index) => {
-      // Use index-based ID to ensure consistency across re-renders
       const logId = `log-${index}`;
       const isExpanded = this.logsExpandedRowId === logId;
+      const entryType = this._getLogEntryType(log);
+      const isError = entryType === 'error';
 
-      // Main row
-      const row = document.createElement('tr');
-      row.className = `logs-table-row ${isExpanded ? 'is-expanded' : ''}`;
-      row.dataset.logId = logId;
+      const action = this.escapeHtml(log.action || 'Unknown action');
+      const subject = this.escapeHtml(log.details?.subject || log.summary || '');
+      const contextLine = this.escapeHtml(log.summary || (log.details ? JSON.stringify(log.details).slice(0, 80) : ''));
+      const relTime = this._logsRelativeTime(log.timestamp);
 
-      const timestamp = new Date(log.timestamp || new Date()).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-
-      const dateStr = new Date(log.timestamp || new Date()).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-      });
-
-      const typeBadge = `<span class="logs-table-type-badge ${log.type}">${log.type || 'unknown'}</span>`;
-      const action = this.escapeHtml(log.action || 'N/A');
-      const summary = this.escapeHtml((log.summary || log.details?.subject || ''));
-      const truncatedSummary = summary.length > 60 ? summary.substring(0, 57) + '...' : summary;
-
-      row.innerHTML = `
-        <td class="logs-col-timestamp">${dateStr} ${timestamp}</td>
-        <td class="logs-col-type">${typeBadge}</td>
-        <td class="logs-col-action">${action}</td>
-        <td class="logs-col-summary">${truncatedSummary}</td>
+      // Entry row
+      const entryEl = document.createElement('div');
+      entryEl.className = `log-entry${isError ? ' log-entry--error' : ''}`;
+      entryEl.dataset.logId = logId;
+      entryEl.innerHTML = `
+        <div class="log-entry__icon log-entry__icon--${entryType}">
+          ${this._getLogIconSvg(entryType)}
+        </div>
+        <div class="log-entry__content">
+          <div class="log-entry__line1">
+            <span class="log-entry__action${isError ? ' log-entry__action--error' : ''}">${action}</span>
+            ${subject ? `<span class="log-entry__separator">—</span><span class="log-entry__subject">${subject}</span>` : ''}
+          </div>
+          ${contextLine ? `<div class="log-entry__line2">${contextLine}</div>` : ''}
+        </div>
+        <div class="log-entry__right">
+          ${this._getLogStatusBadge(entryType)}
+          <span class="log-entry__time">${relTime}</span>
+        </div>
       `;
+      entryEl.addEventListener('click', () => this.handleLogsRowExpand(logId));
+      container.appendChild(entryEl);
 
-      row.addEventListener('click', () => {
-        this.handleLogsRowExpand(logId);
-      });
-
-      tableBody.appendChild(row);
-
-      // Details row (hidden by default)
+      // Expanded accordion detail
       if (isExpanded) {
-        const detailsRow = document.createElement('tr');
-        detailsRow.className = 'logs-table-details-row';
-        detailsRow.dataset.logId = logId;
-        const detailsJson = this.escapeHtml(JSON.stringify(log, null, 2));
-        detailsRow.innerHTML = `
-          <td colspan="4">
-            <div class="logs-details-content">${detailsJson}</div>
-          </td>
-        `;
-        tableBody.appendChild(detailsRow);
+        const detailEl = document.createElement('div');
+        detailEl.className = 'log-entry-detail';
+        detailEl.dataset.logId = logId;
+        detailEl.innerHTML = `<pre class="log-entry-detail__code">${this.escapeHtml(JSON.stringify(log, null, 2))}</pre>`;
+        container.appendChild(detailEl);
       }
     });
   }
@@ -445,17 +468,12 @@ class DashboardClient {
     } else {
       this.logsExpandedRowId = logId;
     }
-    this.renderLogs();
+    this._renderLogsEntries();
   }
 
   async handleLogsLiveToggle(isLive) {
     this.logsIsLive = isLive;
-
-    // Update badge visibility
-    const badge = document.getElementById('logsLivePausedBadge');
-    if (badge) {
-      badge.hidden = isLive;
-    }
+    this._updateLogsLiveLabel();
 
     // If toggling ON, show refresh indicator and fetch fresh logs
     if (isLive) {
@@ -481,65 +499,773 @@ class DashboardClient {
     this.renderLogs();
   }
 
-  fillSettingsForm(s) {
-    const f = (id) => document.getElementById(id);
-    const settings = s && typeof s === 'object' ? s : {};
-    const knownKeys = new Set([
-      'emailProvider',
-      'graphClientId',
-      'graphTenantId',
-      'archiveFolderId',
-      'emailSignature',
-      'lookbackDays',
-      'minScore',
-      'vipSenders',
-      'aiProviderPrimary',
-      'aiProviderFallback',
-      'anthropicApiKey',
-      'openaiApiKey',
-      'aiOpenAiModel',
-      'aiDraftEnabled',
-      'maxDraftLength',
+  // ── Settings tab constants ─────────────────────────────────────────────────
+  static get SETTINGS_TABS() {
+    return [
+      { id: 'connection', label: 'Connection' },
+      { id: 'ai-providers', label: 'AI Providers' },
+      { id: 'categorization', label: 'Categorization' },
+      { id: 'advanced', label: 'Advanced' },
+    ];
+  }
+
+  static get KNOWN_SETTINGS_KEYS() {
+    return new Set([
+      'emailProvider', 'graphClientId', 'graphTenantId', 'archiveFolderId',
+      'emailSignature', 'lookbackDays', 'minScore', 'vipSenders',
+      'aiProviderPrimary', 'aiProviderFallback', 'anthropicApiKey',
+      'openaiApiKey', 'aiOpenAiModel', 'aiDraftEnabled', 'maxDraftLength',
     ]);
-    if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
-    if (f('setting-clientId')) f('setting-clientId').value = s.graphClientId || '';
-    if (f('setting-tenantId')) f('setting-tenantId').value = s.graphTenantId || 'organizations';
-    if (f('setting-archiveFolder')) f('setting-archiveFolder').value = s.archiveFolderId || '';
-    if (f('setting-lookbackDays')) f('setting-lookbackDays').value = s.lookbackDays ?? 3;
-    if (f('setting-minScore')) f('setting-minScore').value = s.minScore ?? 20;
-    if (f('setting-aiPrimary')) f('setting-aiPrimary').value = s.aiProviderPrimary || 'claude-opus';
-    if (f('setting-aiFallback')) f('setting-aiFallback').value = s.aiProviderFallback || 'gemma-lmstudio';
-    if (f('setting-openaiApiKey')) f('setting-openaiApiKey').value = s.openaiApiKey || '';
-    if (f('setting-aiOpenAiModel')) f('setting-aiOpenAiModel').value = s.aiOpenAiModel || 'gpt-5.4';
-    if (f('setting-anthropicApiKey')) f('setting-anthropicApiKey').value = s.anthropicApiKey || '';
-    if (f('setting-aiDraftEnabled')) f('setting-aiDraftEnabled').checked = s.aiDraftEnabled !== false;
-    if (f('setting-maxDraftLength')) f('setting-maxDraftLength').value = s.maxDraftLength ?? 4000;
-    if (f('setting-vipSenders')) {
-      f('setting-vipSenders').value = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
-    }
-    if (f('setting-emailSignature')) {
-      f('setting-emailSignature').value = s.emailSignature || '';
-    }
-    const extraSettings = {};
-    Object.keys(settings).forEach((key) => {
-      if (!knownKeys.has(key)) {
-        extraSettings[key] = settings[key];
-      }
+  }
+
+  // ── Render tab pills ──────────────────────────────────────────────────────
+  renderSettingsTabs() {
+    const container = document.getElementById('settingsTabs');
+    if (!container) return;
+    const activeTab = (typeof PortalState !== 'undefined' ? PortalState.getSettingsTab() : 'connection') || 'connection';
+    // Normalise: map legacy 'general' to 'connection'
+    const normTab = activeTab === 'general' ? 'connection' : activeTab;
+
+    container.innerHTML = DashboardClient.SETTINGS_TABS.map((tab) =>
+      `<button type="button" class="pill${tab.id === normTab ? ' is-active' : ''}" data-settings-tab="${tab.id}">${tab.label}</button>`
+    ).join('');
+
+    container.querySelectorAll('[data-settings-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (typeof PortalState !== 'undefined') PortalState.setSettingsTab(btn.dataset.settingsTab);
+        this.renderSettingsTabs();
+        this.renderActiveSettingsTab();
+      });
     });
-    if (f('setting-extra')) {
-      f('setting-extra').value = Object.keys(extraSettings).length ? JSON.stringify(extraSettings, null, 2) : '';
+  }
+
+  // ── Render active tab content ─────────────────────────────────────────────
+  renderActiveSettingsTab() {
+    const container = document.getElementById('settingsContent');
+    if (!container) return;
+    const s = this._settingsData || {};
+    let activeTab = (typeof PortalState !== 'undefined' ? PortalState.getSettingsTab() : 'connection') || 'connection';
+    if (activeTab === 'general') activeTab = 'connection';
+
+    switch (activeTab) {
+      case 'connection': container.innerHTML = this._renderConnectionTab(s); break;
+      case 'ai-providers': container.innerHTML = this._renderAiProvidersTab(s); break;
+      case 'categorization': container.innerHTML = this._renderCategorizationTab(s); break;
+      case 'advanced': container.innerHTML = this._renderAdvancedTab(s); break;
+      default: container.innerHTML = this._renderConnectionTab(s);
+    }
+
+    // Wire up dirty tracking
+    this._wireSettingsDirtyTracking();
+    // Hide save bar after render (clean state)
+    this._setSettingsDirty(false);
+  }
+
+  // ── Connection tab ────────────────────────────────────────────────────────
+  _renderConnectionTab(s) {
+    const isConnected = s.graphClientId && s.graphTenantId;
+    const statusClass = isConnected ? 'success' : 'error';
+    const statusLabel = isConnected ? 'Connected' : 'Disconnected';
+    const statusIcon = isConnected
+      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+      : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+    const selectedProvider = s.emailProvider || 'auto';
+    const providers = [
+      { value: 'graph', name: 'Microsoft Graph', desc: 'Direct API access via Azure AD' },
+      { value: 'chrome', name: 'Chrome', desc: 'Outlook Web via browser extension' },
+      { value: 'auto', name: 'Auto-detect', desc: 'Automatically choose best provider' },
+    ];
+
+    return `
+      <div class="card">
+        <div class="connection-header">
+          <div class="connection-icon connection-icon--${statusClass}">${statusIcon}</div>
+          <div class="connection-meta">
+            <div class="connection-meta__title">Microsoft Graph</div>
+            <div class="connection-status-text connection-status-text--${statusClass}">${statusLabel}</div>
+          </div>
+          <button type="button" id="graphAuthButton" class="btn btn--secondary btn--sm">Reconnect</button>
+        </div>
+        <div id="graphAuthCodeRow" style="display:none; margin-bottom:8px; gap:8px; align-items:center;">
+          <input id="graphAuthDeviceCode" type="text" readonly class="form-input" aria-label="Graph device code" style="min-width:180px;">
+          <button type="button" id="graphAuthCopyCodeBtn" class="btn btn--ghost btn--sm">Copy code</button>
+        </div>
+        <div id="graphAuthStatus" class="graph-auth-status" aria-live="polite"></div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-card__label">Token Expiry</div>
+            <div class="stat-card__value" id="statTokenExpiry">${isConnected ? 'Active' : '--'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card__label">Last Sync</div>
+            <div class="stat-card__value" id="statLastSync">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card__label">Account</div>
+            <div class="stat-card__value" id="statAccount">${s.graphTenantId || '--'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Email Provider</div>
+        <div class="card__description">Choose how the app fetches your email.</div>
+        <div class="provider-options">
+          ${providers.map((p) => `
+            <div class="provider-option${p.value === selectedProvider ? ' is-selected' : ''}" data-provider="${p.value}">
+              <div class="provider-option__name">${p.name}</div>
+              <div class="provider-option__desc">${p.desc}</div>
+            </div>
+          `).join('')}
+        </div>
+        <input type="hidden" id="setting-provider" value="${selectedProvider}">
+      </div>
+
+      <div class="card">
+        <div class="card__title">Archive Destination</div>
+        <div class="card__description">When set, Archive action moves emails into this Outlook folder.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-archiveFolder">Folder</label>
+          <select id="setting-archiveFolder" class="form-select">
+            <option value="">Default archive behavior</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Inbox Lookback</div>
+        <div class="card__description">Graph triage scans messages in this recent window (plus flagged).</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-lookbackDays">Days</label>
+          <input id="setting-lookbackDays" type="number" class="form-input" min="1" max="60" value="${s.lookbackDays ?? 3}">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Graph Credentials</div>
+        <div class="card__description">Azure AD application registration details.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-clientId">Client ID</label>
+          <input id="setting-clientId" type="text" class="form-input" placeholder="Azure app client ID" spellcheck="false" value="${this._escapeAttr(s.graphClientId || '')}">
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-tenantId">Tenant ID</label>
+          <input id="setting-tenantId" type="text" class="form-input" placeholder="organizations" value="${this._escapeAttr(s.graphTenantId || 'organizations')}">
+        </div>
+      </div>
+    `;
+  }
+
+  // ── AI Providers tab ──────────────────────────────────────────────────────
+  _renderAiProvidersTab(s) {
+    const providerOptions = `
+      <option value="claude-opus">Claude Opus</option>
+      <option value="openai-gpt41">OpenAI (GPT-4.1)</option>
+      <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+    `;
+    const fallbackOptions = `
+      <option value="gemma-lmstudio">Gemma (LM Studio)</option>
+      <option value="openai-gpt54">OpenAI (GPT-5.4)</option>
+      <option value="claude-opus">Claude Opus</option>
+    `;
+    const modelOptions = `
+      <option value="gpt-5.4">GPT-5.4 (Flagship)</option>
+      <option value="gpt-5.4-mini">GPT-5.4 Mini (Cost-effective)</option>
+      <option value="gpt-5.4-nano">GPT-5.4 Nano (Budget)</option>
+      <option value="gpt-4o">GPT-4o</option>
+      <option value="gpt-4o-mini">GPT-4o Mini</option>
+    `;
+
+    return `
+      <div class="card">
+        <div class="card__title">Primary Provider</div>
+        <div class="card__description">Main AI provider for categorization and drafting.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiPrimary">Provider</label>
+          <select id="setting-aiPrimary" class="form-select">${providerOptions}</select>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiOpenAiModel">OpenAI Model</label>
+          <select id="setting-aiOpenAiModel" class="form-select">${modelOptions}</select>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-openaiApiKey">OpenAI API Key</label>
+          <input id="setting-openaiApiKey" type="password" class="form-input" placeholder="sk-..." autocomplete="off" spellcheck="false" value="${this._escapeAttr(s.openaiApiKey || '')}">
+          <div class="form-hint">Used for OpenAI primary/fallback calls.</div>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-anthropicApiKey">Anthropic API Key</label>
+          <input id="setting-anthropicApiKey" type="password" class="form-input" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" value="${this._escapeAttr(s.anthropicApiKey || '')}">
+          <div class="form-hint">Used for Claude primary/fallback calls.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Fallback Provider</div>
+        <div class="card__description">Used when primary provider is unavailable.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-aiFallback">Provider</label>
+          <select id="setting-aiFallback" class="form-select">${fallbackOptions}</select>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">AI Settings</div>
+        <div class="card__description">Control AI drafting behavior.</div>
+        <div class="setting-group" style="display:flex;align-items:center;gap:12px;">
+          <label class="toggle">
+            <input type="checkbox" id="setting-aiDraftEnabled" ${s.aiDraftEnabled !== false ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+            <span class="toggle-knob"></span>
+          </label>
+          <span class="form-label" style="margin-bottom:0;">Enable AI Drafting</span>
+        </div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-maxDraftLength">Max Draft Length (chars)</label>
+          <input id="setting-maxDraftLength" type="number" class="form-input" min="200" max="12000" value="${s.maxDraftLength ?? 4000}">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Scoring &amp; Priority</div>
+        <div class="card__description">Configure triage scoring thresholds.</div>
+        <div class="setting-group">
+          <label class="form-label" for="setting-minScore">Priority Threshold (%)</label>
+          <input id="setting-minScore" type="number" class="form-input" min="0" max="100" value="${s.minScore ?? 20}">
+        </div>
+        <div class="setting-group" style="display:flex;align-items:center;gap:12px;">
+          <label class="toggle">
+            <input type="checkbox" id="setting-groupByPriority" ${(typeof PortalState !== 'undefined' && PortalState.getGroupByPriority()) ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+            <span class="toggle-knob"></span>
+          </label>
+          <span class="form-label" style="margin-bottom:0;">Group by Priority</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Categorization tab ─────────────────────────────────────────────────────
+  _renderCategorizationTab(_s) {
+    // Load categorization settings asynchronously then render
+    this._loadAndRenderCategorization();
+    return '<div id="categorizationBuilder"><div style="padding:24px;color:var(--text-muted);font-size:0.8125rem;">Loading categorization settings...</div></div>';
+  }
+
+  async _loadAndRenderCategorization() {
+    const container = document.getElementById('categorizationBuilder');
+    if (!container) return;
+
+    try {
+      const resp = await fetch('/api/settings/categorisation');
+      this._catSettings = await resp.json();
+    } catch {
+      this._catSettings = { categories: {}, topicLabels: [], customRules: [], topicLabelsGloballyEnabled: true };
+    }
+
+    const cs = this._catSettings;
+    const catColor = (name) => {
+      if (typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor) {
+        return EmailHelpers.getCategoryColor(name);
+      }
+      return { fg: '#777', bg: '#f5f3f0', border: '#e0dbd4', accent: '#999' };
+    };
+
+    // Map canonical keys to display names
+    const CAT_DISPLAY = {
+      todo: 'Needs Reply',
+      to_follow_up: 'Waiting on Others',
+      fyi: 'FYI',
+      notification: 'Notification',
+      marketing: 'Marketing',
+    };
+    const CAT_DESCRIPTIONS = {
+      todo: 'Emails that need your direct reply or action',
+      to_follow_up: 'Waiting for someone else to respond',
+      fyi: 'Informational emails, no action needed',
+      notification: 'Automated notifications and alerts',
+      marketing: 'Newsletters, promotions, and marketing',
+    };
+    const CANONICAL_CATEGORIES = ['todo', 'to_follow_up', 'fyi', 'notification', 'marketing'];
+
+    // Count emails per display category
+    let emailCounts = {};
+    if (typeof EmailHelpers !== 'undefined' && EmailHelpers.countEmailBuckets && Array.isArray(this.triageItems)) {
+      const buckets = EmailHelpers.countEmailBuckets(this.triageItems, {});
+      emailCounts = buckets.categories || {};
+    }
+
+    // ── Category cards ──────────────────────────────────────────────────────
+    let html = '<div class="section-label">Categories</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:24px;">';
+    for (const catKey of CANONICAL_CATEGORIES) {
+      const displayName = CAT_DISPLAY[catKey];
+      const desc = CAT_DESCRIPTIONS[catKey];
+      const color = catColor(displayName);
+      const catConf = (cs.categories && cs.categories[catKey]) || {};
+      const enabled = catConf.enabled !== false;
+      const count = emailCounts[displayName] || 0;
+      html += `
+        <div class="card" style="border-left:3px solid ${color.accent};padding:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span class="card__title" style="margin:0;">${this._escapeHtml(displayName)}</span>
+            <label class="toggle"><input type="checkbox" ${enabled ? 'checked' : ''} data-cat-toggle="${catKey}"><span class="toggle-track"></span><span class="toggle-knob"></span></label>
+          </div>
+          <div class="card__description">${this._escapeHtml(desc)}</div>
+          <div style="font-size:1.25rem;font-weight:700;color:${color.accent};">${count}</div>
+          <div style="font-size:0.625rem;color:var(--text-muted);">emails in inbox</div>
+        </div>`;
+    }
+    html += '</div>';
+
+    // ── Topic Labels ────────────────────────────────────────────────────────
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <span class="section-label" style="margin:0;">Topic Labels</span>
+        <button class="btn btn--primary-ai btn--sm" id="addLabelBtn">+ Add Label</button>
+      </div>
+      <div id="topicLabelsList">`;
+
+    const labels = cs.topicLabels || [];
+    if (labels.length === 0) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:0.8125rem;">No topic labels configured yet.</div>';
+    }
+    for (const label of labels) {
+      const mappedCatDisplay = CAT_DISPLAY[label.mapsToCategory] || label.mapsToCategory;
+      const color = catColor(mappedCatDisplay);
+      const patternsStr = (label.patterns || []).join(',');
+      html += `
+        <div class="card" style="display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:8px;" data-label-id="${this._escapeHtml(label.id || label.key)}">
+          <div style="width:36px;height:36px;background:${color.bg};border-radius:8px;display:flex;align-items:center;justify-content:center;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="${color.fg}" stroke-width="2"><path d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/></svg>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:0.8125rem;">${this._escapeHtml(label.key)}</div>
+            <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">
+              ${(label.patterns || []).map(p => `<span class="pill pill--sm pill--ghost">${this._escapeHtml(p)}</span>`).join('')}
+            </div>
+          </div>
+          <span class="badge" style="background:${color.bg};color:${color.fg};">\u2192 ${this._escapeHtml(mappedCatDisplay)}</span>
+          <span style="font-size:0.6875rem;color:var(--status-success);font-weight:500;" class="label-match-count" data-patterns="${this._escapeHtml(patternsStr)}" data-type="topic_label">loading...</span>
+          <button class="btn btn--icon btn--ghost btn--sm edit-label-btn" data-label-key="${this._escapeHtml(label.key)}">&#9998;</button>
+        </div>`;
+    }
+    html += '</div>';
+
+    // ── Custom Rules ────────────────────────────────────────────────────────
+    const RULE_TYPE_TEXT = {
+      sender_email: 'sender email is',
+      sender_domain: 'sender domain is',
+      subject_contains: 'subject contains',
+      subject_exact: 'subject exactly matches',
+    };
+
+    html += `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:24px;margin-bottom:12px;">
+        <span class="section-label" style="margin:0;">Custom Rules</span>
+        <button class="btn btn--primary-ai btn--sm" id="addRuleBtn">+ Add Rule</button>
+      </div>
+      <div id="customRulesList">`;
+
+    const rules = cs.customRules || [];
+    if (rules.length === 0) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:0.8125rem;">No custom rules configured yet.</div>';
+    }
+    for (let i = 0; i < rules.length; i++) {
+      const rule = rules[i];
+      const actionDisplay = rule.action === 'skip_automation' ? 'Skip' : (CAT_DISPLAY[rule.action] || rule.action);
+      const actionColor = rule.action === 'skip_automation' ? { bg: 'var(--bg-muted)', fg: 'var(--text-muted)' } : catColor(actionDisplay);
+      html += `
+        <div class="card" style="display:flex;align-items:center;gap:10px;padding:14px;margin-bottom:8px;" data-rule-index="${i}">
+          <span class="badge" style="background:var(--bg-muted);color:var(--accent-brand);">IF</span>
+          <span style="font-size:0.75rem;color:var(--text-tertiary);">${RULE_TYPE_TEXT[rule.type] || rule.type}</span>
+          <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);background:var(--bg-rail);padding:4px 10px;border-radius:8px;">${this._escapeHtml(rule.value)}</span>
+          <span class="badge" style="background:var(--bg-muted);color:var(--accent-brand);">THEN</span>
+          <span class="badge" style="background:${actionColor.bg};color:${actionColor.fg};">${this._escapeHtml(actionDisplay)}</span>
+          <span style="font-size:0.6875rem;color:var(--status-success);font-weight:500;margin-left:auto;" class="rule-match-count" data-type="${this._escapeHtml(rule.type)}" data-value="${this._escapeHtml(rule.value)}">loading...</span>
+          <button class="btn btn--icon btn--ghost btn--sm edit-rule-btn" data-rule-index="${i}">&#9998;</button>
+        </div>`;
+    }
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    // ── Wire up event handlers ──────────────────────────────────────────────
+    this._wireCategorizationEvents(container, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+
+    // ── Fetch match counts ──────────────────────────────────────────────────
+    this._fetchCategorizationMatchCounts();
+  }
+
+  _wireCategorizationEvents(container, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT) {
+    // Category enable/disable toggles
+    container.querySelectorAll('[data-cat-toggle]').forEach(toggle => {
+      toggle.addEventListener('change', async () => {
+        const catKey = toggle.dataset.catToggle;
+        if (!cs.categories[catKey]) cs.categories[catKey] = {};
+        cs.categories[catKey].enabled = toggle.checked;
+        await this._saveCategorizationSettings(cs);
+      });
+    });
+
+    // Add label button
+    const addLabelBtn = document.getElementById('addLabelBtn');
+    if (addLabelBtn) {
+      addLabelBtn.addEventListener('click', () => {
+        this._showLabelEditor(null, cs, CANONICAL_CATEGORIES, CAT_DISPLAY);
+      });
+    }
+
+    // Edit label buttons
+    container.querySelectorAll('.edit-label-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.labelKey;
+        const label = (cs.topicLabels || []).find(l => l.key === key);
+        if (label) this._showLabelEditor(label, cs, CANONICAL_CATEGORIES, CAT_DISPLAY);
+      });
+    });
+
+    // Add rule button
+    const addRuleBtn = document.getElementById('addRuleBtn');
+    if (addRuleBtn) {
+      addRuleBtn.addEventListener('click', () => {
+        this._showRuleEditor(null, -1, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+      });
+    }
+
+    // Edit rule buttons
+    container.querySelectorAll('.edit-rule-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.ruleIndex, 10);
+        const rule = (cs.customRules || [])[idx];
+        if (rule) this._showRuleEditor(rule, idx, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT);
+      });
+    });
+  }
+
+  // ── Label inline editor ─────────────────────────────────────────────────
+  _showLabelEditor(existingLabel, cs, CANONICAL_CATEGORIES, CAT_DISPLAY) {
+    const listEl = document.getElementById('topicLabelsList');
+    if (!listEl) return;
+
+    const isNew = !existingLabel;
+    const label = existingLabel || { key: '', patterns: [], mapsToCategory: 'fyi', enabled: true };
+
+    // Remove any existing editor
+    const old = document.getElementById('labelEditorInline');
+    if (old) old.remove();
+
+    const editor = document.createElement('div');
+    editor.id = 'labelEditorInline';
+    editor.className = 'card';
+    editor.style.cssText = 'padding:16px;margin-bottom:8px;border:1px solid var(--accent-brand);';
+
+    const catOptions = CANONICAL_CATEGORIES.map(k =>
+      `<option value="${k}" ${k === label.mapsToCategory ? 'selected' : ''}>${this._escapeHtml(CAT_DISPLAY[k])}</option>`
+    ).join('');
+
+    editor.innerHTML = `
+      <div style="font-weight:600;font-size:0.8125rem;margin-bottom:10px;">${isNew ? 'New Topic Label' : 'Edit Topic Label'}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Label Key</label>
+          <input type="text" id="labelEdKey" class="form-input" value="${this._escapeHtml(label.key)}" placeholder="e.g. invoices">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Maps to Category</label>
+          <select id="labelEdCategory" class="form-select">${catOptions}</select>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label class="form-label" style="font-size:0.6875rem;">Patterns (comma-separated)</label>
+        <input type="text" id="labelEdPatterns" class="form-input" value="${this._escapeHtml(label.patterns.join(', '))}" placeholder="invoice, receipt, payment">
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn--primary-ai btn--sm" id="labelEdSave">Save</button>
+        <button class="btn btn--ghost btn--sm" id="labelEdCancel">Cancel</button>
+        ${!isNew ? '<button class="btn btn--ghost btn--sm" id="labelEdDelete" style="margin-left:auto;color:var(--status-error);">Delete</button>' : ''}
+      </div>`;
+
+    if (isNew) {
+      listEl.prepend(editor);
+    } else {
+      const card = listEl.querySelector(`[data-label-id="${label.id || label.key}"]`);
+      if (card) card.replaceWith(editor);
+      else listEl.prepend(editor);
+    }
+
+    document.getElementById('labelEdCancel').addEventListener('click', () => {
+      this._loadAndRenderCategorization();
+    });
+
+    document.getElementById('labelEdSave').addEventListener('click', async () => {
+      const key = document.getElementById('labelEdKey').value.trim();
+      const patterns = document.getElementById('labelEdPatterns').value.split(',').map(p => p.trim()).filter(Boolean);
+      const mapsToCategory = document.getElementById('labelEdCategory').value;
+
+      if (!key || patterns.length === 0) {
+        alert('Label key and at least one pattern are required.');
+        return;
+      }
+
+      if (isNew) {
+        cs.topicLabels = cs.topicLabels || [];
+        cs.topicLabels.push({ id: 'label_' + Date.now(), key, patterns, mapsToCategory, enabled: true });
+      } else {
+        const idx = cs.topicLabels.findIndex(l => l.key === label.key);
+        if (idx >= 0) {
+          cs.topicLabels[idx] = { ...cs.topicLabels[idx], key, patterns, mapsToCategory };
+        }
+      }
+
+      await this._saveCategorizationSettings(cs);
+      this._loadAndRenderCategorization();
+    });
+
+    const delBtn = document.getElementById('labelEdDelete');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        cs.topicLabels = (cs.topicLabels || []).filter(l => l.key !== label.key);
+        await this._saveCategorizationSettings(cs);
+        this._loadAndRenderCategorization();
+      });
     }
   }
 
-  async saveSettings(formData) {
-    const statusEl = document.getElementById('settingsSaveStatus');
-    const btn = document.querySelector('#settingsForm button[type="submit"]');
-    if (btn) btn.disabled = true;
-    if (statusEl) statusEl.textContent = 'Saving…';
+  // ── Rule inline editor ──────────────────────────────────────────────────
+  _showRuleEditor(existingRule, ruleIndex, cs, CANONICAL_CATEGORIES, CAT_DISPLAY, RULE_TYPE_TEXT) {
+    const listEl = document.getElementById('customRulesList');
+    if (!listEl) return;
 
-    const vipRaw = formData.get('vipSenders') || '';
+    const isNew = !existingRule;
+    const rule = existingRule || { id: '', type: 'sender_domain', value: '', action: 'fyi', enabled: true };
+
+    const old = document.getElementById('ruleEditorInline');
+    if (old) old.remove();
+
+    const editor = document.createElement('div');
+    editor.id = 'ruleEditorInline';
+    editor.className = 'card';
+    editor.style.cssText = 'padding:16px;margin-bottom:8px;border:1px solid var(--accent-brand);';
+
+    const typeOptions = Object.entries(RULE_TYPE_TEXT).map(([val, text]) =>
+      `<option value="${val}" ${val === rule.type ? 'selected' : ''}>${this._escapeHtml(text)}</option>`
+    ).join('');
+
+    const actionOptions = CANONICAL_CATEGORIES.map(k =>
+      `<option value="${k}" ${k === rule.action ? 'selected' : ''}>${this._escapeHtml(CAT_DISPLAY[k])}</option>`
+    ).join('') + `<option value="skip_automation" ${rule.action === 'skip_automation' ? 'selected' : ''}>Skip automation</option>`;
+
+    editor.innerHTML = `
+      <div style="font-weight:600;font-size:0.8125rem;margin-bottom:10px;">${isNew ? 'New Custom Rule' : 'Edit Custom Rule'}</div>
+      <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:10px;margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Condition Type</label>
+          <select id="ruleEdType" class="form-select">${typeOptions}</select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Value</label>
+          <input type="text" id="ruleEdValue" class="form-input" value="${this._escapeHtml(rule.value)}" placeholder="e.g. example.com">
+        </div>
+        <div>
+          <label class="form-label" style="font-size:0.6875rem;">Action</label>
+          <select id="ruleEdAction" class="form-select">${actionOptions}</select>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn--primary-ai btn--sm" id="ruleEdSave">Save</button>
+        <button class="btn btn--ghost btn--sm" id="ruleEdCancel">Cancel</button>
+        ${!isNew ? '<button class="btn btn--ghost btn--sm" id="ruleEdDelete" style="margin-left:auto;color:var(--status-error);">Delete</button>' : ''}
+      </div>`;
+
+    if (isNew) {
+      listEl.prepend(editor);
+    } else {
+      const card = listEl.querySelector(`[data-rule-index="${ruleIndex}"]`);
+      if (card) card.replaceWith(editor);
+      else listEl.prepend(editor);
+    }
+
+    document.getElementById('ruleEdCancel').addEventListener('click', () => {
+      this._loadAndRenderCategorization();
+    });
+
+    document.getElementById('ruleEdSave').addEventListener('click', async () => {
+      const type = document.getElementById('ruleEdType').value;
+      const value = document.getElementById('ruleEdValue').value.trim();
+      const action = document.getElementById('ruleEdAction').value;
+
+      if (!value) {
+        alert('Value is required.');
+        return;
+      }
+
+      if (isNew) {
+        cs.customRules = cs.customRules || [];
+        cs.customRules.push({ id: 'rule_' + Date.now(), type, value, action, enabled: true });
+      } else {
+        cs.customRules[ruleIndex] = { ...cs.customRules[ruleIndex], type, value, action };
+      }
+
+      await this._saveCategorizationSettings(cs);
+      this._loadAndRenderCategorization();
+    });
+
+    const delBtn = document.getElementById('ruleEdDelete');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        cs.customRules.splice(ruleIndex, 1);
+        await this._saveCategorizationSettings(cs);
+        this._loadAndRenderCategorization();
+      });
+    }
+  }
+
+  // ── Save categorization settings ──────────────────────────────────────────
+  async _saveCategorizationSettings(settings) {
     try {
-      const extraRaw = String(formData.get('extraSettingsJson') || '').trim();
+      const resp = await fetch('/api/settings/categorisation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await resp.json();
+      if (!data.success) throw new Error(data.error || 'Save failed');
+      this._catSettings = data.settings || settings;
+    } catch (e) {
+      console.error('Save categorization settings error:', e);
+      alert('Failed to save categorization settings: ' + e.message);
+    }
+  }
+
+  // ── Fetch match counts for labels and rules ───────────────────────────────
+  async _fetchCategorizationMatchCounts() {
+    const labelEls = document.querySelectorAll('.label-match-count');
+    for (const el of labelEls) {
+      const patterns = el.dataset.patterns;
+      const type = el.dataset.type;
+      try {
+        const resp = await fetch(`/api/categorization/preview?type=${encodeURIComponent(type)}&value=${encodeURIComponent(patterns)}`);
+        const data = await resp.json();
+        el.textContent = `${data.matchCount} match${data.matchCount !== 1 ? 'es' : ''}`;
+      } catch { el.textContent = '\u2014'; }
+    }
+
+    const ruleEls = document.querySelectorAll('.rule-match-count');
+    for (const el of ruleEls) {
+      const type = el.dataset.type;
+      const value = el.dataset.value;
+      try {
+        const resp = await fetch(`/api/categorization/preview?type=${encodeURIComponent(type)}&value=${encodeURIComponent(value)}`);
+        const data = await resp.json();
+        el.textContent = `${data.matchCount} match${data.matchCount !== 1 ? 'es' : ''}`;
+      } catch { el.textContent = '\u2014'; }
+    }
+  }
+
+  // ── Advanced tab ──────────────────────────────────────────────────────────
+  _renderAdvancedTab(s) {
+    const vipValue = Array.isArray(s.vipSenders) ? s.vipSenders.join(', ') : (s.vipSenders || '');
+    const knownKeys = DashboardClient.KNOWN_SETTINGS_KEYS;
+    const extraSettings = {};
+    Object.keys(s).forEach((key) => {
+      if (!knownKeys.has(key)) extraSettings[key] = s[key];
+    });
+    const extraJson = Object.keys(extraSettings).length ? JSON.stringify(extraSettings, null, 2) : '';
+
+    return `
+      <div class="card">
+        <div class="card__title">VIP Senders</div>
+        <div class="card__description">Emails from these senders are always prioritised.</div>
+        <div class="setting-group">
+          <textarea id="setting-vipSenders" class="form-textarea" rows="3" placeholder="ceo@, vp@, director@">${this._escapeHtml(vipValue)}</textarea>
+          <div class="form-hint">Comma-separated prefixes or addresses</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Email Signature</div>
+        <div class="card__description">Appended to AI-generated draft replies.</div>
+        <div class="setting-group">
+          <textarea id="setting-emailSignature" class="form-textarea" rows="4" placeholder="Kind regards,\nDamian">${this._escapeHtml(s.emailSignature || '')}</textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Additional Settings (JSON)</div>
+        <div class="card__description">Custom keys are loaded here and saved back to settings.</div>
+        <div class="setting-group">
+          <textarea id="setting-extra" class="form-textarea" rows="6" placeholder='{\n  "graphScopes": ["Mail.Read", "User.Read"]\n}'>${this._escapeHtml(extraJson)}</textarea>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Post-render: set select values (must be called after innerHTML) ───────
+  _applySelectValues() {
+    const s = this._settingsData || {};
+    const f = (id) => document.getElementById(id);
+    if (f('setting-provider')) f('setting-provider').value = s.emailProvider || 'auto';
+    if (f('setting-archiveFolder')) f('setting-archiveFolder').value = s.archiveFolderId || '';
+    if (f('setting-aiPrimary')) f('setting-aiPrimary').value = s.aiProviderPrimary || 'claude-opus';
+    if (f('setting-aiFallback')) f('setting-aiFallback').value = s.aiProviderFallback || 'gemma-lmstudio';
+    if (f('setting-aiOpenAiModel')) f('setting-aiOpenAiModel').value = s.aiOpenAiModel || 'gpt-5.4';
+  }
+
+  // ── Dirty state tracking ──────────────────────────────────────────────────
+  _wireSettingsDirtyTracking() {
+    const content = document.getElementById('settingsContent');
+    if (!content) return;
+
+    // Set select values after render
+    this._applySelectValues();
+
+    // Wire provider option cards
+    content.querySelectorAll('.provider-option').forEach((card) => {
+      card.addEventListener('click', () => {
+        content.querySelectorAll('.provider-option').forEach((c) => c.classList.remove('is-selected'));
+        card.classList.add('is-selected');
+        const hiddenInput = document.getElementById('setting-provider');
+        if (hiddenInput) hiddenInput.value = card.dataset.provider;
+        this._setSettingsDirty(true);
+      });
+    });
+
+    // Track changes on inputs/selects/textareas
+    content.querySelectorAll('input, select, textarea').forEach((el) => {
+      el.addEventListener('input', () => this._setSettingsDirty(true));
+      el.addEventListener('change', () => this._setSettingsDirty(true));
+    });
+
+    // Wire group-by-priority toggle directly (not part of server settings)
+    const groupToggle = document.getElementById('setting-groupByPriority');
+    if (groupToggle) {
+      groupToggle.addEventListener('change', () => {
+        if (typeof PortalState !== 'undefined') PortalState.setGroupByPriority(groupToggle.checked);
+      });
+    }
+  }
+
+  _setSettingsDirty(dirty) {
+    if (typeof PortalState !== 'undefined') PortalState.setSettingsDirty(dirty);
+    const bar = document.getElementById('settingsSaveBar');
+    if (bar) bar.hidden = !dirty;
+  }
+
+  // ── Gather values from current form controls and save ─────────────────────
+  async saveSettings() {
+    const saveBtn = document.getElementById('settingsSave');
+    if (saveBtn) saveBtn.disabled = true;
+
+    const f = (id) => {
+      const el = document.getElementById(id);
+      return el ? (el.type === 'checkbox' ? el.checked : el.value) : undefined;
+    };
+
+    try {
+      const vipRaw = String(f('setting-vipSenders') || '');
+      const extraRaw = String(f('setting-extra') || '').trim();
       let extraSettings = {};
       if (extraRaw) {
         const parsed = JSON.parse(extraRaw);
@@ -549,45 +1275,154 @@ class DashboardClient {
         extraSettings = parsed;
       }
 
+      // Merge with existing data so we don't lose fields from other tabs
       const payload = {
-        emailProvider: formData.get('emailProvider'),
-        graphClientId: formData.get('graphClientId'),
-        graphTenantId: formData.get('graphTenantId') || 'organizations',
-        archiveFolderId: formData.get('archiveFolderId') || '',
-        lookbackDays: Number(formData.get('lookbackDays')) || 3,
-        minScore: Number(formData.get('minScore')) || 20,
-        vipSenders: vipRaw.split(',').map((s) => s.trim()).filter(Boolean),
-        emailSignature: formData.get('emailSignature') || '',
-        aiProviderPrimary: formData.get('aiProviderPrimary') || 'claude-opus',
-        aiProviderFallback: formData.get('aiProviderFallback') || 'gemma-lmstudio',
-        openaiApiKey: formData.get('openaiApiKey') || '',
-        aiOpenAiModel: formData.get('aiOpenAiModel') || 'gpt-4.1',
-        anthropicApiKey: formData.get('anthropicApiKey') || '',
-        aiDraftEnabled: formData.get('aiDraftEnabled') === 'on',
-        maxDraftLength: Number(formData.get('maxDraftLength')) || 4000,
-        extraSettings
+        ...(this._settingsData || {}),
+        emailProvider: f('setting-provider') ?? this._settingsData?.emailProvider ?? 'auto',
+        graphClientId: f('setting-clientId') ?? this._settingsData?.graphClientId ?? '',
+        graphTenantId: f('setting-tenantId') ?? this._settingsData?.graphTenantId ?? 'organizations',
+        archiveFolderId: f('setting-archiveFolder') ?? this._settingsData?.archiveFolderId ?? '',
+        lookbackDays: Number(f('setting-lookbackDays')) || this._settingsData?.lookbackDays || 3,
+        minScore: Number(f('setting-minScore')) || this._settingsData?.minScore || 20,
+        vipSenders: f('setting-vipSenders') !== undefined
+          ? vipRaw.split(',').map((s) => s.trim()).filter(Boolean)
+          : (this._settingsData?.vipSenders || []),
+        emailSignature: f('setting-emailSignature') ?? this._settingsData?.emailSignature ?? '',
+        aiProviderPrimary: f('setting-aiPrimary') ?? this._settingsData?.aiProviderPrimary ?? 'claude-opus',
+        aiProviderFallback: f('setting-aiFallback') ?? this._settingsData?.aiProviderFallback ?? 'gemma-lmstudio',
+        openaiApiKey: f('setting-openaiApiKey') ?? this._settingsData?.openaiApiKey ?? '',
+        aiOpenAiModel: f('setting-aiOpenAiModel') ?? this._settingsData?.aiOpenAiModel ?? 'gpt-5.4',
+        anthropicApiKey: f('setting-anthropicApiKey') ?? this._settingsData?.anthropicApiKey ?? '',
+        aiDraftEnabled: f('setting-aiDraftEnabled') !== undefined ? f('setting-aiDraftEnabled') : (this._settingsData?.aiDraftEnabled !== false),
+        maxDraftLength: Number(f('setting-maxDraftLength')) || this._settingsData?.maxDraftLength || 4000,
+        extraSettings,
       };
 
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || `HTTP ${res.status}`);
-      if (statusEl) {
-        statusEl.textContent = 'Saved';
-        statusEl.className = 'settings-save-status saved';
-        setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'settings-save-status'; }, 2000);
-      }
+
+      // Update local cache
+      this._settingsData = payload;
+      this._setSettingsDirty(false);
+      this.showToast('success', 'Settings saved successfully');
     } catch (e) {
-      if (statusEl) {
-        statusEl.textContent = `Error: ${e.message}`;
-        statusEl.className = 'settings-save-status error';
-      }
+      console.error('Save settings error:', e);
+      alert('Failed to save settings: ' + e.message);
     } finally {
-      if (btn) btn.disabled = false;
+      if (saveBtn) saveBtn.disabled = false;
     }
+  }
+
+  // ── HTML helpers for settings templates ────────────────────────────────────
+  _escapeAttr(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  _escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Graph status popover ──────────────────────────────────────────────────
+  toggleGraphPopover() {
+    let popover = document.querySelector('.graph-popover');
+    if (popover) {
+      popover.remove();
+      return;
+    }
+
+    const s = this._settingsData || {};
+    const isConnected = s.graphClientId && s.graphTenantId;
+
+    // Derive live token state from _graphTokenExpiry
+    const tokenExpiry = this._graphTokenExpiry;
+    let tokenStatusClass = 'neutral';
+    let tokenStatusLabel = 'Unknown';
+    let statusClass;
+    let statusLabel;
+    if (isConnected) {
+      if (tokenExpiry) {
+        const remainingMs = tokenExpiry - Date.now();
+        const fifteenMin = 15 * 60 * 1000;
+        if (remainingMs <= 0) {
+          tokenStatusClass = 'error';
+          tokenStatusLabel = 'Expired';
+          statusClass = 'error';
+          statusLabel = 'Token Expired';
+        } else if (remainingMs <= fifteenMin) {
+          tokenStatusClass = 'warning';
+          tokenStatusLabel = 'Expiring soon';
+          statusClass = 'warning';
+          statusLabel = 'Expiring soon';
+        } else {
+          tokenStatusClass = 'success';
+          tokenStatusLabel = 'Active';
+          statusClass = 'success';
+          statusLabel = 'Connected';
+        }
+      } else {
+        tokenStatusClass = 'error';
+        tokenStatusLabel = 'Unknown';
+        statusClass = 'error';
+        statusLabel = 'No token';
+      }
+    } else {
+      statusClass = 'error';
+      statusLabel = 'Disconnected';
+    }
+
+    const statusIcon = statusClass === 'success'
+      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+      : statusClass === 'warning'
+        ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-warning)" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+        : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-error)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+    popover = document.createElement('div');
+    popover.className = 'graph-popover';
+    popover.innerHTML = `
+      <div class="connection-header">
+        <div class="connection-icon connection-icon--${statusClass}">${statusIcon}</div>
+        <div class="connection-meta">
+          <div class="connection-meta__title">Microsoft Graph</div>
+          <div class="connection-status-text connection-status-text--${statusClass}">${statusLabel}</div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-card__label">Token</div>
+          <div class="stat-card__value stat-card__value--${tokenStatusClass}">${tokenStatusLabel}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Tenant</div>
+          <div class="stat-card__value">${this._escapeHtml(s.graphTenantId || '--')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card__label">Provider</div>
+          <div class="stat-card__value">${this._escapeHtml(s.emailProvider || 'auto')}</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(popover);
+
+    // Close on click outside
+    const closeHandler = (e) => {
+      if (!popover.contains(e.target) && e.target.id !== 'graphStatusBtn' && !e.target.closest('#graphStatusBtn')) {
+        popover.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  // Backward-compat stub
+  fillSettingsForm(s) {
+    this._settingsData = s;
+    this.renderSettingsTabs();
+    this.renderActiveSettingsTab();
   }
 
   async refreshTriage() {    const statusEl = document.getElementById('triageStatus');
@@ -654,8 +1489,8 @@ class DashboardClient {
       EmailHelpers.warnIfLargeEmailList(filtered);
     }
 
-    // Compute counts for left rail (after search, before active filter narrowing)
-    this.updateRailCounts(merged);
+    // Compute counts for filter pills (after search, before active filter narrowing)
+    this.updateFilterCounts(merged);
     
     this.renderEmailCards(filtered);
     this.updateFilterActiveStates();
@@ -672,81 +1507,198 @@ class DashboardClient {
     }
   }
 
-  updateRailCounts(items) {
+  updateFilterCounts(items) {
     if (typeof EmailHelpers === 'undefined' || !EmailHelpers.countEmailBuckets) {
       return;
     }
 
     const counts = EmailHelpers.countEmailBuckets(items, { search: this.emailFilters.search });
-    const countMap = {
-      'count-cat-needs-reply': counts.categories['Needs Reply'] || 0,
-      'count-cat-waiting': counts.categories['Waiting on Others'] || 0,
-      'count-cat-fyi': counts.categories.FYI || 0,
-      'count-state-flagged': counts.states.Flagged || 0,
-      'count-state-pinned': counts.states.Pinned || 0,
-      'count-state-done': counts.states.Done || 0,
-    };
+    this._lastTagCounts = counts.tags || {};
 
-    Object.entries(countMap).forEach(([id, value]) => {
-      const el = document.getElementById(id);
-      if (el) {
-        el.textContent = value > 0 ? `(${value})` : '';
-      }
-    });
+    // ── Category pills ──────────────────────────────────────────────────────
+    const categoryPillsEl = document.getElementById('categoryPills');
+    if (categoryPillsEl) {
+      categoryPillsEl.textContent = '';
 
-    this.renderTagRail(counts.tags || {});
+      const allCount = Object.values(counts.categories).reduce((s, n) => s + n, 0);
+      const allPill = document.createElement('button');
+      allPill.type = 'button';
+      allPill.className = 'pill' + (!this.emailFilters.category ? ' is-active' : '');
+      allPill.dataset.category = '';
+      allPill.textContent = 'All ';
+      const allSpan = document.createElement('span');
+      allSpan.className = 'pill-count';
+      allSpan.textContent = String(allCount);
+      allPill.appendChild(allSpan);
+      categoryPillsEl.appendChild(allPill);
+
+      const categoryVariants = {
+        'Needs Reply': 'needs-reply',
+        'Waiting on Others': 'waiting',
+        'FYI': 'fyi',
+      };
+
+      ['Needs Reply', 'Waiting on Others', 'FYI'].forEach((cat) => {
+        const count = counts.categories[cat] || 0;
+        const variant = categoryVariants[cat] || '';
+        const isActive = this.emailFilters.category === cat;
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'pill' + (isActive ? ' is-active pill--' + variant : '');
+        pill.dataset.category = cat;
+        pill.textContent = cat + ' ';
+        const countSpan = document.createElement('span');
+        countSpan.className = 'pill-count';
+        countSpan.textContent = String(count);
+        pill.appendChild(countSpan);
+        categoryPillsEl.appendChild(pill);
+      });
+
+      // Attach click handlers to category pills
+      categoryPillsEl.querySelectorAll('[data-category]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.emailFilters.category = btn.dataset.category || null;
+          this.renderTriage();
+        });
+      });
+    }
+
+    // ── State pills ─────────────────────────────────────────────────────────
+    const statePillsEl = document.getElementById('statePills');
+    if (statePillsEl) {
+      statePillsEl.textContent = '';
+
+      ['Flagged', 'Pinned', 'Done'].forEach((state) => {
+        const isActive = this.emailFilters.state === state;
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'pill pill--sm pill--ghost' + (isActive ? ' is-active' : '');
+        pill.dataset.state = state;
+        pill.textContent = state;
+        statePillsEl.appendChild(pill);
+      });
+
+      // Tag overflow pill
+      const selectedTagCount = this.emailFilters.tags.length;
+      const tagOverflow = document.createElement('span');
+      tagOverflow.className = 'pill pill--sm pill--ghost';
+      tagOverflow.id = 'tagOverflowPill';
+      tagOverflow.hidden = selectedTagCount === 0;
+      tagOverflow.textContent = '+' + selectedTagCount + ' tag' + (selectedTagCount !== 1 ? 's' : '');
+      statePillsEl.appendChild(tagOverflow);
+
+      // Tag filter button
+      const tagBtn = document.createElement('button');
+      tagBtn.type = 'button';
+      tagBtn.className = 'btn btn--icon btn--ghost';
+      tagBtn.id = 'tagFilterBtn';
+      tagBtn.setAttribute('aria-label', 'Filter by tags');
+      tagBtn.style.marginLeft = 'auto';
+      tagBtn.style.position = 'relative';
+      const tagSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      tagSvg.setAttribute('width', '14');
+      tagSvg.setAttribute('height', '14');
+      tagSvg.setAttribute('viewBox', '0 0 24 24');
+      tagSvg.setAttribute('fill', 'none');
+      tagSvg.setAttribute('stroke', 'currentColor');
+      tagSvg.setAttribute('stroke-width', '2');
+      tagSvg.setAttribute('stroke-linecap', 'round');
+      const tagPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      tagPoly.setAttribute('points', '22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3');
+      tagSvg.appendChild(tagPoly);
+      tagBtn.appendChild(tagSvg);
+      statePillsEl.appendChild(tagBtn);
+
+      // Attach click handlers to state pills
+      statePillsEl.querySelectorAll('[data-state]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.emailFilters.state = this.emailFilters.state === btn.dataset.state ? null : btn.dataset.state;
+          this.renderTriage();
+        });
+      });
+
+      // Attach tag filter popover toggle
+      tagBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleTagPopover(tagBtn);
+      });
+    }
   }
 
-  renderTagRail(tagCounts) {
-    const tagList = document.getElementById('tagList');
-    if (!tagList) {
+  toggleTagPopover(anchorBtn) {
+    let popover = document.querySelector('.tag-popover');
+    if (popover) {
+      popover.remove();
       return;
     }
 
-    const entries = Object.entries(tagCounts || {})
+    const tagCounts = this._lastTagCounts || {};
+    const entries = Object.entries(tagCounts)
       .filter(([, count]) => Number(count) > 0)
-      .sort((a, b) => {
-        if (b[1] !== a[1]) {
-          return b[1] - a[1];
+      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+
+    popover = document.createElement('div');
+    popover.className = 'tag-popover';
+
+    const title = document.createElement('div');
+    title.className = 'tag-popover__title';
+    title.textContent = 'Filter by tags';
+    popover.appendChild(title);
+
+    const tagsWrap = document.createElement('div');
+    tagsWrap.className = 'tag-popover__tags';
+
+    entries.forEach(([tag]) => {
+      const isSelected = this.emailFilters.tags.includes(tag);
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'pill pill--sm pill--ghost' + (isSelected ? ' is-active' : '');
+      pill.dataset.popoverTag = tag;
+      pill.textContent = tag;
+      pill.addEventListener('click', () => {
+        const idx = this.emailFilters.tags.indexOf(tag);
+        if (idx >= 0) {
+          this.emailFilters.tags.splice(idx, 1);
+        } else {
+          this.emailFilters.tags.push(tag);
         }
-        return String(a[0]).localeCompare(String(b[0]));
+        this.renderTriage();
       });
-
-    tagList.innerHTML = '';
-
-    const allLi = document.createElement('li');
-    const allBtn = document.createElement('button');
-    allBtn.type = 'button';
-    allBtn.className = 'rail-filter';
-    allBtn.dataset.tag = '';
-    allBtn.textContent = 'All Tags';
-    allLi.appendChild(allBtn);
-    tagList.appendChild(allLi);
-
-    entries.forEach(([tag, count]) => {
-      const li = document.createElement('li');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'rail-filter';
-      btn.dataset.tag = String(tag);
-      btn.textContent = `${tag} (${count})`;
-      li.appendChild(btn);
-      tagList.appendChild(li);
+      tagsWrap.appendChild(pill);
     });
+
+    popover.appendChild(tagsWrap);
+
+    if (this.emailFilters.tags.length > 0) {
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'tag-popover__clear';
+      clearBtn.textContent = 'Clear all';
+      clearBtn.addEventListener('click', () => {
+        this.emailFilters.tags = [];
+        this.renderTriage();
+      });
+      popover.appendChild(clearBtn);
+    }
+
+    // Position relative to anchorBtn
+    anchorBtn.style.position = 'relative';
+    anchorBtn.appendChild(popover);
+
+    // Close popover when clicking outside
+    const closeHandler = (e) => {
+      if (!popover.contains(e.target) && e.target !== anchorBtn && !anchorBtn.contains(e.target)) {
+        popover.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
   updateFilterActiveStates() {
-    document.querySelectorAll('[data-category]').forEach((btn) => {
-      btn.classList.toggle('is-active', (btn.dataset.category || null) === this.emailFilters.category);
-    });
-
-    document.querySelectorAll('[data-state]').forEach((btn) => {
-      btn.classList.toggle('is-active', (btn.dataset.state || null) === this.emailFilters.state);
-    });
-
-    document.querySelectorAll('[data-tag]').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.tag === this.emailFilters.tag);
-    });
+    // Category and state pills are now fully re-rendered in updateFilterCounts(),
+    // so active states are applied there. This method is kept as a no-op for
+    // backward compatibility with any code that still calls it.
   }
 
   renderEmailCards(items) {
@@ -757,7 +1709,7 @@ class DashboardClient {
     const safeItems = Array.isArray(items) ? items : [];
     this.selectedEmailId = resolveSelectedEmailId(this.selectedEmailId, safeItems);
 
-    listEl.innerHTML = '';
+    listEl.textContent = '';
 
     if (!safeItems.length) {
       this.mobileReaderOpen = false;
@@ -781,253 +1733,215 @@ class DashboardClient {
     this.renderReaderPane(selectedItem);
     this.syncEmailWorkspaceState();
 
-    safeItems.forEach((item) => {
+    // Helper: check if an item belongs to the 'act-now' tier
+    const isActNow = (item) => {
+      return item.urgency === 'high' && (item.score || 0) >= 70;
+    };
+
+    // Helper: build a single compact email row element
+    const buildEmailRow = (item) => {
       const itemId = String(item && item.id ? item.id : '');
       const isSelected = Boolean(itemId) && itemId === this.selectedEmailId;
       const sender = String((item && item.sender) || 'Unknown sender');
       const subject = String((item && item.subject) || 'No subject');
-      const recommendedAction = String((item && item.recommendedAction) || 'Review');
-      const preview = String((item && item.preview) || (item && item.body) || 'No preview available.');
+      const preview = String((item && item.preview) || (item && item.body) || '');
       const category = String((item && item.primaryCategory) || 'FYI');
       const tags = Array.isArray(item && item.tags) ? item.tags : [];
       const visibleTags = tags.slice(0, 2);
       const overflowTagCount = Math.max(tags.length - visibleTags.length, 0);
-      const scoreText = String((item && item.scoreMeta && item.scoreMeta.confidenceText) || item.confidence || `${Math.round(Number(item && item.score ? item.score : 0))}%`);
+      const score = typeof item.score === 'number' ? item.score : 0;
       const timestampMeta = typeof EmailHelpers !== 'undefined' && EmailHelpers.resolveDisplayTimestamp
         ? EmailHelpers.resolveDisplayTimestamp(item)
         : { value: item && item.timestamp ? item.timestamp : item && item.ingestedAt };
       const isoTimestamp = String((timestampMeta && timestampMeta.value) || '');
-      const openUrl = item && item.openUrl;
-      const safeOpenUrl = openUrl && isSafeUrl(openUrl) ? openUrl : '';
-      const initial = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
-      const reasonText = Array.isArray(item && item.reasons) && item.reasons.length
-        ? item.reasons.join(' | ')
-        : String((item && item.reason) || 'No explicit reason provided.');
-      const matchedSignals = Array.isArray(item && item.matchedSignals)
-        ? item.matchedSignals
-        : (Array.isArray(item && item.signals) ? item.signals : []);
 
-      const cardEl = document.createElement('div');
-      cardEl.className = 'email-card';
-      cardEl.dataset.id = itemId;
-      cardEl.dataset.selected = isSelected ? 'true' : 'false';
-      cardEl.dataset.expanded = 'false';
+      // Derive colors from helpers
+      const senderInitials = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
+      const avColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.avatarColor
+        ? EmailHelpers.avatarColor(sender)
+        : { bg: '#e8d5c4', fg: '#8b6a4f' };
+      const heatColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.scoreToHeatColor
+        ? EmailHelpers.scoreToHeatColor(score)
+        : '#e0dbd4';
+      const catColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor
+        ? EmailHelpers.getCategoryColor(category)
+        : { fg: '#777', bg: '#f5f3f0' };
 
-      const collapsedEl = document.createElement('div');
-      collapsedEl.className = 'card-collapsed';
+      const actNow = isActNow(item);
 
+      // ── Row container ─────────────────────────────────────────────────────
+      const rowEl = document.createElement('div');
+      rowEl.className = 'email-row' + (actNow ? ' is-act-now' : '') + (isSelected ? ' is-selected' : '');
+      rowEl.dataset.id = itemId;
+      rowEl.style.borderLeftColor = heatColor;
+
+      // ── Avatar ────────────────────────────────────────────────────────────
       const avatarEl = document.createElement('div');
-      avatarEl.className = 'card-avatar';
-      avatarEl.textContent = initial;
+      avatarEl.className = 'avatar avatar--md';
+      avatarEl.style.background = avColor.bg;
+      avatarEl.style.color = avColor.fg;
+      avatarEl.textContent = senderInitials;
 
+      // ── Content wrapper ───────────────────────────────────────────────────
       const contentEl = document.createElement('div');
-      contentEl.className = 'card-content';
+      contentEl.className = 'email-row__content';
 
-      const subjectRowEl = document.createElement('div');
-      subjectRowEl.className = 'card-subject-row';
-
-      const subjectEl = document.createElement('span');
-      subjectEl.className = 'card-subject';
-      subjectEl.textContent = subject;
-
-      const actionBadgeEl = document.createElement('span');
-      actionBadgeEl.className = 'card-action-badge';
-      actionBadgeEl.textContent = recommendedAction;
-
-      subjectRowEl.append(subjectEl, actionBadgeEl);
-
-      const metaRowEl = document.createElement('div');
-      metaRowEl.className = 'card-meta-row';
+      // ── Line 1 ────────────────────────────────────────────────────────────
+      const line1 = document.createElement('div');
+      line1.className = 'email-row__line1';
 
       const senderEl = document.createElement('span');
-      senderEl.className = 'card-sender';
+      senderEl.className = 'email-row__sender';
       senderEl.textContent = sender;
 
-      const timestampEl = document.createElement('span');
-      timestampEl.className = 'card-timestamp';
-      timestampEl.textContent = relativeTime(isoTimestamp);
-      timestampEl.title = isoTimestamp;
+      const badgeEl = document.createElement('span');
+      badgeEl.className = 'badge';
+      badgeEl.style.background = catColor.bg;
+      badgeEl.style.color = catColor.fg;
+      badgeEl.textContent = category;
 
-      const confidenceEl = document.createElement('span');
-      confidenceEl.className = 'card-confidence';
-      confidenceEl.textContent = scoreText;
-
-      metaRowEl.append(senderEl, timestampEl, confidenceEl);
-
-      const previewEl = document.createElement('div');
-      previewEl.className = 'card-preview';
-      previewEl.textContent = preview;
-
-      const pillsEl = document.createElement('div');
-      pillsEl.className = 'card-pills';
-
-      const categoryPillEl = document.createElement('span');
-      categoryPillEl.className = 'pill category-pill';
-      categoryPillEl.textContent = category;
-      pillsEl.appendChild(categoryPillEl);
-
+      const tagsEl = document.createElement('span');
+      tagsEl.className = 'email-row__tags';
       visibleTags.forEach((tag) => {
-        const tagPillEl = document.createElement('span');
-        tagPillEl.className = 'pill tag-pill';
-        tagPillEl.textContent = String(tag);
-        pillsEl.appendChild(tagPillEl);
+        const pill = document.createElement('span');
+        pill.className = 'pill pill--sm pill--ghost';
+        pill.textContent = String(tag);
+        tagsEl.appendChild(pill);
       });
-
       if (overflowTagCount > 0) {
-        const overflowPillEl = document.createElement('span');
-        overflowPillEl.className = 'pill tag-pill';
-        overflowPillEl.textContent = `+${overflowTagCount} more`;
-        pillsEl.appendChild(overflowPillEl);
+        const overflowPill = document.createElement('span');
+        overflowPill.className = 'pill pill--sm pill--ghost';
+        overflowPill.textContent = '+' + overflowTagCount;
+        tagsEl.appendChild(overflowPill);
       }
 
-      contentEl.append(subjectRowEl, metaRowEl, previewEl, pillsEl);
-      collapsedEl.append(avatarEl, contentEl);
+      line1.append(senderEl, badgeEl, tagsEl);
 
-      const actionsEl = document.createElement('div');
-      actionsEl.className = 'card-actions';
-
-      const openEl = document.createElement('a');
-      openEl.className = 'btn-card-action';
-      openEl.textContent = 'Open';
-      openEl.target = '_blank';
-      openEl.rel = 'noopener noreferrer';
-      openEl.href = safeOpenUrl || '#';
-      if (!safeOpenUrl) {
-        openEl.classList.add('is-disabled');
-        openEl.setAttribute('aria-disabled', 'true');
+      if (actNow) {
+        const actionLabel = document.createElement('span');
+        actionLabel.className = 'email-row__action-label';
+        actionLabel.textContent = 'Action required';
+        line1.appendChild(actionLabel);
       }
 
-      const pinEl = document.createElement('button');
-      pinEl.type = 'button';
-      pinEl.className = 'btn-card-action';
-      pinEl.dataset.action = 'pin';
-      pinEl.textContent = 'Pin';
-      if (item && item.uiState && item.uiState.pinned) {
-        pinEl.classList.add('is-active');
-      }
+      const scoreDot = document.createElement('span');
+      scoreDot.className = 'email-row__score-dot';
+      scoreDot.style.background = heatColor;
 
-      const doneEl = document.createElement('button');
-      doneEl.type = 'button';
-      doneEl.className = 'btn-card-action';
-      doneEl.dataset.action = 'done';
-      doneEl.textContent = 'Done';
+      const timeEl = document.createElement('span');
+      timeEl.className = 'email-row__time';
+      timeEl.textContent = relativeTime(isoTimestamp);
+      timeEl.title = isoTimestamp;
 
-      const draftEl = document.createElement('button');
-      draftEl.type = 'button';
-      draftEl.className = 'btn-card-action';
-      draftEl.dataset.action = 'draft';
-      draftEl.textContent = 'Draft Reply';
+      line1.append(scoreDot, timeEl);
 
-      const deleteEl = document.createElement('button');
-      deleteEl.type = 'button';
-      deleteEl.className = 'btn-card-action btn-card-action-danger';
-      deleteEl.dataset.action = 'delete';
-      deleteEl.textContent = '🗑 Delete';
+      // ── Line 2 ────────────────────────────────────────────────────────────
+      const line2 = document.createElement('div');
+      line2.className = 'email-row__line2';
 
-      const archiveEl = document.createElement('button');
-      archiveEl.type = 'button';
-      archiveEl.className = 'btn-card-action';
-      archiveEl.dataset.action = 'archive';
-      archiveEl.textContent = '📦 Archive';
+      const subjectEl = document.createElement('span');
+      subjectEl.className = 'email-row__subject';
+      subjectEl.textContent = subject;
 
-      actionsEl.append(openEl, pinEl, doneEl, draftEl, deleteEl, archiveEl);
+      const previewEl = document.createElement('span');
+      previewEl.className = 'email-row__preview';
+      previewEl.textContent = preview ? ' \u2014 ' + preview : '';
 
-      const expandedEl = document.createElement('div');
-      expandedEl.className = 'card-expanded';
-      expandedEl.hidden = true;
+      line2.append(subjectEl, previewEl);
 
-      const bodyPreviewEl = document.createElement('div');
-      bodyPreviewEl.className = 'card-body-preview';
-      bodyPreviewEl.textContent = String((item && item.body) || preview);
+      contentEl.append(line1, line2);
+      rowEl.append(avatarEl, contentEl);
 
-      const reasonEl = document.createElement('div');
-      reasonEl.className = 'card-reason';
-      const reasonLabelEl = document.createElement('strong');
-      reasonLabelEl.textContent = 'Reason:';
-      reasonEl.append(reasonLabelEl, document.createTextNode(` ${reasonText}`));
-
-      const aiMetaEl = document.createElement('div');
-      aiMetaEl.className = 'card-signals';
-      const aiMetaLabelEl = document.createElement('strong');
-      aiMetaLabelEl.textContent = 'AI:';
-      const aiMetaText = formatAiProviderLabel(item);
-      aiMetaEl.append(aiMetaLabelEl, document.createTextNode(` ${aiMetaText}`));
-
-      const categorySourceEl = document.createElement('div');
-      categorySourceEl.className = 'card-signals';
-      const categorySourceLabelEl = document.createElement('strong');
-      categorySourceLabelEl.textContent = 'Category Source:';
-      const categorySourceText = formatCategorySourceLabel(item);
-      categorySourceEl.append(categorySourceLabelEl, document.createTextNode(` ${categorySourceText}`));
-
-      const signalsEl = document.createElement('div');
-      signalsEl.className = 'card-signals';
-      const signalsLabelEl = document.createElement('strong');
-      signalsLabelEl.textContent = 'Matched signals:';
-      signalsEl.append(signalsLabelEl, document.createTextNode(` ${matchedSignals.length ? matchedSignals.join(', ') : 'None'}`));
-
-      const rawEl = document.createElement('details');
-      rawEl.className = 'card-raw';
-
-      const readerMetadataStrip = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
-
-      const rawSummaryEl = document.createElement('summary');
-      rawSummaryEl.textContent = 'Raw metadata';
-
-      const rawContentEl = document.createElement('pre');
-      rawContentEl.className = 'card-raw-content';
-      rawContentEl.textContent = JSON.stringify(item, null, 2);
-
-      rawEl.append(rawSummaryEl, rawContentEl);
-  expandedEl.append(readerMetadataStrip, bodyPreviewEl, reasonEl, aiMetaEl, categorySourceEl, signalsEl, rawEl);
-
-      collapsedEl.addEventListener('click', () => {
+      // ── Click handler ─────────────────────────────────────────────────────
+      rowEl.addEventListener('click', () => {
         if (itemId) {
           this.selectedEmailId = itemId;
-          listEl.querySelectorAll('.email-card').forEach((node) => {
-            node.dataset.selected = node.dataset.id === itemId ? 'true' : 'false';
+          listEl.querySelectorAll('.email-row').forEach((node) => {
+            node.classList.toggle('is-selected', node.dataset.id === itemId);
           });
           this.openMobileReader(listEl);
           this.renderReaderPane(item);
         }
-
-        const isExpanded = cardEl.dataset.expanded === 'true';
-        cardEl.dataset.expanded = isExpanded ? 'false' : 'true';
-        expandedEl.hidden = isExpanded;
       });
 
-      openEl.addEventListener('click', (event) => {
-        event.stopPropagation();
-        if (!safeOpenUrl) {
-          event.preventDefault();
-        }
+      return rowEl;
+    };
+
+    // ── Render with or without priority grouping ────────────────────────────
+    const useGrouping = typeof PortalState !== 'undefined' && PortalState.getGroupByPriority
+      ? PortalState.getGroupByPriority()
+      : true;
+
+    if (useGrouping && typeof EmailHelpers !== 'undefined' && EmailHelpers.groupByPriorityTier) {
+      const groups = EmailHelpers.groupByPriorityTier(safeItems);
+
+      groups.forEach((group) => {
+        // Tier header
+        const headerEl = document.createElement('div');
+        headerEl.className = 'tier-header tier-header--' + group.key;
+        headerEl.dataset.tier = group.key;
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'tier-header__label';
+        labelEl.textContent = group.label;
+
+        const countEl = document.createElement('span');
+        countEl.className = 'tier-header__count';
+        countEl.textContent = String(group.items.length);
+
+        const lineEl = document.createElement('span');
+        lineEl.className = 'tier-header__line';
+
+        const chevronEl = document.createElement('span');
+        chevronEl.className = 'tier-header__chevron';
+        chevronEl.textContent = '\u25BE';
+
+        headerEl.append(labelEl, countEl, lineEl, chevronEl);
+
+        // Tier group container
+        const groupEl = document.createElement('div');
+        groupEl.className = 'tier-group';
+        groupEl.dataset.tier = group.key;
+
+        group.items.forEach((item) => {
+          groupEl.appendChild(buildEmailRow(item));
+        });
+
+        // Collapse toggle
+        headerEl.addEventListener('click', () => {
+          headerEl.classList.toggle('is-collapsed');
+          groupEl.classList.toggle('is-collapsed');
+        });
+
+        listEl.append(headerEl, groupEl);
       });
+    } else {
+      // Flat list — no tier headers
+      safeItems.forEach((item) => {
+        listEl.appendChild(buildEmailRow(item));
+      });
+    }
+  }
 
-      pinEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
+  // ── Stubs for action handlers (attached via delegation or kept for reader pane) ──
+  _handleEmailPin(item, itemId) {
+    if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+      return;
+    }
 
-        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
-          return;
+    const currentUiState = item && item.uiState ? item.uiState : {};
+    const newPinnedValue = !Boolean(currentUiState.pinned);
+
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: Boolean(newPinnedValue) }),
+    })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (!payload.success) {
+          throw new Error(payload.error || 'Failed');
         }
-
-        const currentUiState = item && item.uiState ? item.uiState : {};
-        const newPinnedValue = !Boolean(currentUiState.pinned);
-
-        try {
-          const response = await fetch(`/api/emails/${encodeURIComponent(itemId)}/pin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: Boolean(newPinnedValue) }),
-          });
-          const payload = await response.json();
-          if (!payload.success) {
-            throw new Error(payload.error || `HTTP ${response.status}`);
-          }
-        } catch (error) {
-          alert(`Failed to update pin state in Outlook: ${error.message}`);
-          return;
-        }
-
         const state = PortalState.readEmailUiState();
         const newDoneValue = Boolean(currentUiState.done);
         state[itemId] = {
@@ -1035,159 +1949,31 @@ class DashboardClient {
           done: Boolean(newDoneValue),
           updatedAt: new Date().toISOString(),
         };
-
         PortalState.writeEmailUiState(state);
         this.renderTriage();
+      })
+      .catch((error) => {
+        alert(`Failed to update pin state in Outlook: ${error.message}`);
       });
+  }
 
-      doneEl.addEventListener('click', (event) => {
-        event.stopPropagation();
+  _handleEmailDone(item, itemId) {
+    if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
+      return;
+    }
 
-        if (typeof PortalState === 'undefined' || !PortalState.readEmailUiState || !PortalState.writeEmailUiState) {
-          return;
-        }
+    const state = PortalState.readEmailUiState();
+    const currentUiState = item && item.uiState ? item.uiState : {};
+    const newPinnedValue = Boolean(currentUiState.pinned);
+    const newDoneValue = !Boolean(currentUiState.done);
+    state[itemId] = {
+      pinned: Boolean(newPinnedValue),
+      done: Boolean(newDoneValue),
+      updatedAt: new Date().toISOString(),
+    };
 
-        const state = PortalState.readEmailUiState();
-        const currentUiState = item && item.uiState ? item.uiState : {};
-        const newPinnedValue = Boolean(currentUiState.pinned);
-        const newDoneValue = !Boolean(currentUiState.done);
-        state[itemId] = {
-          pinned: Boolean(newPinnedValue),
-          done: Boolean(newDoneValue),
-          updatedAt: new Date().toISOString(),
-        };
-
-        PortalState.writeEmailUiState(state);
-        this.renderTriage();
-      });
-
-      draftEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        try {
-          const generatedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
-            method: 'POST',
-          });
-          const generatedData = await generatedRes.json();
-          if (!generatedData.success) {
-            throw new Error(generatedData.error || `HTTP ${generatedRes.status}`);
-          }
-
-          const generatedDraft = generatedData.draft || {};
-          const providerNotice = formatDraftProviderNotice(generatedDraft);
-          const editedDraft = await this.openDraftEditorModal({
-            subject: generatedDraft.subject,
-            body: generatedDraft.body,
-            providerNotice,
-          });
-          if (!editedDraft) {
-            return;
-          }
-
-          const savedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subject: editedDraft.subject,
-              body: editedDraft.body,
-            }),
-          });
-          const savedData = await savedRes.json();
-          if (!savedData.success) {
-            throw new Error(savedData.error || `HTTP ${savedRes.status}`);
-          }
-
-          if (!window.confirm(`${providerNotice}\nApprove this draft for sending?`)) {
-            return;
-          }
-
-          const approvedRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/approve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ approvedBy: 'user' }),
-          });
-          const approvedData = await approvedRes.json();
-          if (!approvedData.success) {
-            throw new Error(approvedData.error || `HTTP ${approvedRes.status}`);
-          }
-
-          if (!window.confirm(`${providerNotice}\nSend approved draft now?`)) {
-            return;
-          }
-
-          const sendRes = await fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/send`, {
-            method: 'POST',
-          });
-          const sendData = await sendRes.json();
-          if (!sendData.success) {
-            throw new Error(sendData.error || `HTTP ${sendRes.status}`);
-          }
-
-          alert('Draft sent successfully.');
-        } catch (err) {
-          alert(`Draft flow failed: ${err.message}`);
-        }
-      });
-
-      deleteEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        if (!confirm('Are you sure you want to delete this email?')) {
-          return;
-        }
-
-        try {
-          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/delete`, {
-            method: 'POST',
-          });
-          const data = await res.json();
-          if (!data.success) {
-            throw new Error(data.error || `HTTP ${res.status}`);
-          }
-
-          // Remove the email from the list
-          cardEl.remove();
-          if (document.getElementById('triageList').children.length === 0) {
-            const emptyStateEl = document.getElementById('emailEmptyState');
-            if (emptyStateEl) {
-              emptyStateEl.textContent = 'No emails found.';
-              emptyStateEl.hidden = false;
-            }
-          }
-        } catch (err) {
-          alert(`Failed to delete email: ${err.message}`);
-        }
-      });
-
-      archiveEl.addEventListener('click', async (event) => {
-        event.stopPropagation();
-
-        try {
-          const res = await fetch(`/api/emails/${encodeURIComponent(itemId)}/archive`, {
-            method: 'POST',
-          });
-          const data = await res.json();
-          if (!data.success) {
-            throw new Error(data.error || `HTTP ${res.status}`);
-          }
-
-          // Archive the email by removing it from the list
-          cardEl.remove();
-          if (document.getElementById('triageList').children.length === 0) {
-            const emptyStateEl = document.getElementById('emailEmptyState');
-            if (emptyStateEl) {
-              emptyStateEl.textContent = 'No emails found.';
-              emptyStateEl.hidden = false;
-            }
-          }
-        } catch (err) {
-          alert(`Failed to archive email: ${err.message}`);
-        }
-      });
-
-      cardEl.append(collapsedEl, actionsEl, expandedEl);
-      listEl.appendChild(cardEl);
-    });
+    PortalState.writeEmailUiState(state);
+    this.renderTriage();
   }
 
   renderReaderPane(item) {
@@ -1199,13 +1985,113 @@ class DashboardClient {
     readerPane.innerHTML = '';
 
     if (!item) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'reader-empty';
-      placeholder.textContent = 'Select an email to view details.';
-      readerPane.appendChild(placeholder);
+      readerPane.innerHTML = '<div class="reader-empty">Select an email to read</div>';
       return;
     }
 
+    const itemId = String(item.id || '');
+    const sender = String(item.sender || 'Unknown sender');
+    const senderEmail = String(item.senderEmail || item.from || '');
+    const subject = String(item.subject || 'No subject');
+    const category = String(item.primaryCategory || 'FYI');
+    const tags = Array.isArray(item.tags) ? item.tags : [];
+    const score = typeof item.score === 'number' ? item.score : 0;
+    const senderInitials = sender.trim() ? sender.trim().charAt(0).toUpperCase() : '?';
+
+    const avColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.avatarColor
+      ? EmailHelpers.avatarColor(sender)
+      : { bg: '#e8d5c4', fg: '#8b6a4f' };
+    const catColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.getCategoryColor
+      ? EmailHelpers.getCategoryColor(category)
+      : { fg: '#777', bg: '#f5f3f0' };
+    const heatColor = typeof EmailHelpers !== 'undefined' && EmailHelpers.scoreToHeatColor
+      ? EmailHelpers.scoreToHeatColor(score)
+      : '#e0dbd4';
+
+    const timestampMeta = typeof EmailHelpers !== 'undefined' && EmailHelpers.resolveDisplayTimestamp
+      ? EmailHelpers.resolveDisplayTimestamp(item)
+      : { value: item.timestamp || item.ingestedAt };
+    const isoTimestamp = String((timestampMeta && timestampMeta.value) || '');
+
+    const currentUiState = item.uiState || {};
+    const isPinned = Boolean(currentUiState.pinned);
+    const isDone = Boolean(currentUiState.done);
+
+    // ── Tag pills HTML ──────────────────────────────────────────────────────
+    const tagPillsHtml = tags.map((t) =>
+      `<span class="pill pill--sm pill--ghost">${this.escapeHtml(String(t))}</span>`
+    ).join('');
+
+    // ── Score detail section ────────────────────────────────────────────────
+    const urgency = this.escapeHtml(String(item.urgency || 'unknown'));
+    const recommendedAction = this.escapeHtml(String(item.recommendedAction || item.action || 'none'));
+    const reasons = Array.isArray(item.reasons) ? item.reasons : [];
+    const reasonsHtml = reasons.map((r) => `<li>${this.escapeHtml(String(r))}</li>`).join('');
+
+    // ── Draft section ───────────────────────────────────────────────────────
+    const draft = item.draft || null;
+    let draftHtml = '';
+    if (draft) {
+      const draftText = this.escapeHtml(String(draft.body || draft.text || ''));
+      const providerName = this.escapeHtml(formatDraftProviderNotice(draft));
+      draftHtml = `
+        <div class="card card--ai" id="draftCard">
+          <div class="draft-header">
+            <div class="draft-icon">\u2605</div>
+            <span class="draft-label">AI DRAFT</span>
+            <span class="draft-provider">${providerName}</span>
+          </div>
+          <div class="draft-body" id="draftBody">${draftText}</div>
+          <div class="draft-actions" id="draftActions">
+            <button class="btn btn--primary-ai btn--sm" data-action="send-draft" id="sendDraftBtn">Send Draft</button>
+            <button class="btn btn--secondary btn--sm" data-action="edit-draft">Edit</button>
+            <button class="btn btn--ghost btn--sm" data-action="regenerate">Regenerate</button>
+          </div>
+        </div>`;
+    }
+
+    // ── Build full reader HTML ──────────────────────────────────────────────
+    const html = `
+      <div class="reader-header">
+        <div class="reader-header__top">
+          <div class="avatar avatar--lg" style="background: ${avColor.bg}; color: ${avColor.fg}">${this.escapeHtml(senderInitials)}</div>
+          <div class="reader-header__meta">
+            <div class="reader-header__subject">${this.escapeHtml(subject)}</div>
+            <div class="reader-header__sender">${this.escapeHtml(sender)} &middot; ${this.escapeHtml(senderEmail)} &middot; ${this.escapeHtml(relativeTime(isoTimestamp))}</div>
+          </div>
+          <div class="reader-header__badges">
+            <span class="badge" style="background: ${catColor.bg}; color: ${catColor.fg}">${this.escapeHtml(category)}</span>
+            ${tagPillsHtml}
+            <span class="badge reader-score-badge" style="background: ${heatColor}; color: #fff" id="scoreToggle">Score: ${score}</span>
+          </div>
+        </div>
+
+        <div class="reader-score-detail" id="scoreDetail" hidden>
+          <div class="section-label">Scoring Details</div>
+          <div><strong>Urgency:</strong> ${urgency}</div>
+          <div><strong>Action:</strong> ${recommendedAction}</div>
+          <div><strong>Reasons:</strong></div>
+          <ul>${reasonsHtml}</ul>
+        </div>
+
+        <div class="reader-actions">
+          <button class="btn btn--secondary btn--sm" data-action="reply">Reply</button>
+          <button class="btn btn--secondary btn--sm" data-action="pin">${isPinned ? 'Unpin' : 'Pin'}</button>
+          <button class="btn btn--secondary btn--sm" data-action="move" id="moveToBtn" style="position: relative;">Move to\u2026</button>
+          <button class="btn btn--secondary btn--sm" data-action="archive">Archive</button>
+          <button class="btn btn--secondary btn--sm" data-action="done">${isDone ? 'Undo Done' : 'Done'}</button>
+          <button class="btn btn--danger btn--sm" data-action="delete" style="margin-left: auto;">Delete</button>
+        </div>
+      </div>
+
+      <div class="reader-body">${this.escapeHtml(String(item.body || item.preview || 'No content available.'))}</div>
+
+      ${draftHtml}
+    `;
+
+    readerPane.innerHTML = html;
+
+    // ── Mobile back button (must be after innerHTML) ──────────────────────
     if (isMobileReaderViewport()) {
       const backButton = document.createElement('button');
       backButton.type = 'button';
@@ -1214,20 +2100,348 @@ class DashboardClient {
       backButton.addEventListener('click', () => {
         this.closeMobileReader();
       });
-      readerPane.appendChild(backButton);
+      readerPane.prepend(backButton);
     }
 
-    const subject = document.createElement('h3');
-    subject.className = 'reader-subject';
-    subject.textContent = String(item.subject || 'No subject');
+    // ── Wire up action buttons ──────────────────────────────────────────────
+    this._wireReaderActions(item, itemId, readerPane);
+  }
 
-    const metadata = createReaderMetadataStrip(item, { maxEntries: 4, maxLines: 2 });
+  _wireReaderActions(item, itemId, readerPane) {
+    // Score toggle
+    const scoreToggle = readerPane.querySelector('#scoreToggle');
+    const scoreDetail = readerPane.querySelector('#scoreDetail');
+    if (scoreToggle && scoreDetail) {
+      scoreToggle.addEventListener('click', () => {
+        scoreDetail.hidden = !scoreDetail.hidden;
+      });
+    }
 
-    const body = document.createElement('div');
-    body.className = 'reader-body';
-    body.textContent = String(item.body || item.preview || 'No content available.');
+    // Action buttons via delegation
+    readerPane.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const action = e.currentTarget.dataset.action;
+        switch (action) {
+          case 'reply':
+            this._handleReaderReply(item, itemId);
+            break;
+          case 'pin':
+            this._handleEmailPin(item, itemId);
+            break;
+          case 'archive':
+            this._handleReaderArchive(itemId);
+            break;
+          case 'done':
+            this._handleEmailDone(item, itemId);
+            break;
+          case 'delete':
+            this._handleReaderDelete(itemId);
+            break;
+          case 'move':
+            this._handleReaderMove(item, itemId, e.currentTarget);
+            break;
+          case 'send-draft':
+            this._handleSendDraft(item, itemId, e.currentTarget);
+            break;
+          case 'edit-draft':
+            this._handleEditDraft(item, itemId);
+            break;
+          case 'regenerate':
+            this._handleRegenerateDraft(item, itemId);
+            break;
+          case 'save-draft':
+            this._handleSaveDraft(item, itemId);
+            break;
+          case 'cancel-edit':
+            this.renderReaderPane(item);
+            break;
+        }
+      });
+    });
+  }
 
-    readerPane.append(subject, metadata, body);
+  // ── Reader action handlers ──────────────────────────────────────────────
+  _handleReaderReply(item, itemId) {
+    // Generate AI draft
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.draft) {
+          item.draft = data.draft;
+          this.renderReaderPane(item);
+        } else {
+          this.showToast('error', 'Draft generation failed — retrying with fallback');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to generate draft:', err);
+        this.showToast('error', 'Draft generation failed — retrying with fallback');
+      });
+  }
+
+  _handleReaderArchive(itemId) {
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== itemId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+          this.showToast('success', 'Email archived');
+        }
+      })
+      .catch((err) => alert('Archive failed: ' + err.message));
+  }
+
+  _handleReaderDelete(itemId) {
+    if (!confirm('Delete this email permanently?')) return;
+    fetch(`/api/emails/${encodeURIComponent(itemId)}/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== itemId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+          this.showToast('success', 'Email deleted');
+        }
+      })
+      .catch((err) => alert('Delete failed: ' + err.message));
+  }
+
+  // ── Inline draft editing ──────────────────────────────────────────────────
+  _handleEditDraft(item, itemId) {
+    const draftCard = document.getElementById('draftCard');
+    if (!draftCard) return;
+    const draft = item.draft || {};
+    const draftSubject = String(draft.subject || item.subject || '');
+    const draftBody = String(draft.body || draft.text || '');
+
+    const draftBodyEl = document.getElementById('draftBody');
+    const draftActionsEl = document.getElementById('draftActions');
+    if (!draftBodyEl || !draftActionsEl) return;
+
+    // Insert subject input before body
+    const subjectInput = document.createElement('input');
+    subjectInput.className = 'form-input draft-edit-subject';
+    subjectInput.id = 'draftEditSubject';
+    subjectInput.value = draftSubject;
+    draftBodyEl.parentNode.insertBefore(subjectInput, draftBodyEl);
+
+    // Replace body with textarea
+    const textarea = document.createElement('textarea');
+    textarea.className = 'form-textarea';
+    textarea.id = 'draftEditBody';
+    textarea.value = draftBody;
+    textarea.rows = calculateDraftEditorRows(draftBody);
+    draftBodyEl.replaceWith(textarea);
+
+    // Replace action buttons
+    draftActionsEl.innerHTML = `
+      <button class="btn btn--primary btn--sm" data-action="save-draft">Save</button>
+      <button class="btn btn--ghost btn--sm" data-action="cancel-edit">Cancel</button>
+    `;
+
+    // Wire up new buttons
+    draftActionsEl.querySelectorAll('[data-action]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const action = e.currentTarget.dataset.action;
+        if (action === 'save-draft') {
+          this._handleSaveDraft(item, itemId);
+        } else if (action === 'cancel-edit') {
+          this.renderReaderPane(item);
+        }
+      });
+    });
+
+    textarea.focus();
+  }
+
+  _handleSaveDraft(item, itemId) {
+    const subjectInput = document.getElementById('draftEditSubject');
+    const bodyTextarea = document.getElementById('draftEditBody');
+    if (!subjectInput || !bodyTextarea) return;
+
+    const updatedSubject = subjectInput.value;
+    const updatedBody = bodyTextarea.value;
+
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: updatedSubject, body: updatedBody }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success || data.draft) {
+          if (!item.draft) item.draft = {};
+          item.draft.subject = updatedSubject;
+          item.draft.body = updatedBody;
+        }
+        this.renderReaderPane(item);
+      })
+      .catch((err) => {
+        console.error('Failed to save draft:', err);
+        this.renderReaderPane(item);
+      });
+  }
+
+  _handleSendDraft(item, itemId, btn) {
+    if (btn.dataset.confirming === 'true') {
+      // Second click during confirm window — actually send
+      btn.textContent = 'Sending...';
+      btn.disabled = true;
+      fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            delete item.draft;
+            this.renderReaderPane(item);
+            this.showToast('success', 'Draft sent successfully');
+          } else {
+            alert('Send failed: ' + (data.error || 'Unknown error'));
+            btn.textContent = 'Send Draft';
+            btn.disabled = false;
+            btn.dataset.confirming = 'false';
+          }
+        })
+        .catch((err) => {
+          alert('Send failed: ' + err.message);
+          btn.textContent = 'Send Draft';
+          btn.disabled = false;
+          btn.dataset.confirming = 'false';
+        });
+      return;
+    }
+
+    // First click — enter confirm state
+    btn.dataset.confirming = 'true';
+    btn.textContent = 'Confirm Send?';
+    btn.classList.add('btn--confirm');
+
+    setTimeout(() => {
+      if (btn.dataset.confirming === 'true') {
+        btn.textContent = 'Send Draft';
+        btn.classList.remove('btn--confirm');
+        btn.dataset.confirming = 'false';
+      }
+    }, 3000);
+  }
+
+  _handleRegenerateDraft(item, itemId) {
+    fetch(`/api/emails/drafts/${encodeURIComponent(itemId)}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.draft) {
+          item.draft = data.draft;
+          this.renderReaderPane(item);
+        } else {
+          this.showToast('error', 'Draft generation failed — retrying with fallback');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to regenerate draft:', err);
+        this.showToast('error', 'Draft generation failed — retrying with fallback');
+      });
+  }
+
+  // ── Move to folder ──────────────────────────────────────────────────────
+  _handleReaderMove(item, itemId, btnEl) {
+    // Close existing popover if open
+    const existing = document.getElementById('folderPopover');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const popover = document.createElement('div');
+    popover.className = 'folder-popover';
+    popover.id = 'folderPopover';
+    popover.innerHTML = '<div class="section-label">Move to folder</div><div class="folder-popover__list" id="folderList">Loading...</div>';
+    btnEl.appendChild(popover);
+
+    // Close on outside click
+    const closePopover = (e) => {
+      if (!popover.contains(e.target) && e.target !== btnEl) {
+        popover.remove();
+        document.removeEventListener('click', closePopover);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closePopover), 0);
+
+    // Fetch folders (with cache)
+    const renderFolders = (folders) => {
+      const listEl = document.getElementById('folderList');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      folders.forEach((folder) => {
+        const btn = document.createElement('button');
+        btn.className = 'folder-popover__item';
+        btn.dataset.folderId = folder.id;
+        btn.textContent = folder.displayName;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._moveEmailToFolder(itemId, folder.id, item);
+          popover.remove();
+          document.removeEventListener('click', closePopover);
+        });
+        listEl.appendChild(btn);
+      });
+    };
+
+    if (this.folderCache) {
+      renderFolders(this.folderCache);
+    } else {
+      fetch('/api/graph/mail-folders')
+        .then((res) => res.json())
+        .then((data) => {
+          const folders = Array.isArray(data.folders) ? data.folders : [];
+          this.folderCache = folders;
+          renderFolders(folders);
+        })
+        .catch((err) => {
+          const listEl = document.getElementById('folderList');
+          if (listEl) listEl.textContent = 'Failed to load folders';
+          console.error('Folder fetch error:', err);
+        });
+    }
+  }
+
+  _moveEmailToFolder(emailId, folderId, item) {
+    const folderName = (this.folderCache && this.folderCache.find((f) => f.id === folderId)?.displayName) || folderId;
+    fetch(`/api/emails/${encodeURIComponent(emailId)}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success || !data.error) {
+          this.triageItems = this.triageItems.filter((t) => String(t.id) !== emailId);
+          this.selectedEmailId = null;
+          this.renderReaderPane(null);
+          this.renderTriage();
+          this.showToast('success', 'Email moved to ' + folderName);
+        } else {
+          alert('Move failed: ' + (data.error || 'Unknown error'));
+        }
+      })
+      .catch((err) => alert('Move failed: ' + err.message));
   }
 
   openMobileReader(listEl) {
@@ -1497,6 +2711,85 @@ class DashboardClient {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
   }
+
+  showToast(type, message, action) {
+    const toastArea = document.getElementById('toastArea');
+    if (!toastArea) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast toast--' + type;
+
+    let html = '';
+    if (type === 'warning') {
+      html += '<span class="status-dot status-dot--warning"></span>';
+    } else if (type === 'error') {
+      html += '<span class="status-dot status-dot--error"></span>';
+    } else if (type === 'success') {
+      html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>';
+    }
+
+    html += '<span style="flex: 1;">' + this.escapeHtml(message) + '</span>';
+
+    if (action) {
+      html += '<button class="btn btn--primary-ai btn--sm toast-action">' + this.escapeHtml(action.text) + '</button>';
+    }
+
+    toast.innerHTML = html;
+
+    if (action && action.onClick) {
+      const btn = toast.querySelector('.toast-action');
+      if (btn) btn.addEventListener('click', action.onClick);
+    }
+
+    // Auto-dismiss after 5 seconds
+    const dismiss = () => { if (toast.parentNode) toast.remove(); };
+    setTimeout(dismiss, 5000);
+
+    // Click toast to dismiss
+    toast.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('toast-action')) dismiss();
+    });
+
+    toastArea.appendChild(toast);
+  }
+
+  checkGraphTokenExpiry() {
+    // Check if we have token expiry info from settings or connection state
+    const dot = document.getElementById('graphStatusDot');
+    if (!dot) return;
+
+    // Read token info from _settingsData or _graphConnectionState
+    const tokenExpiry = this._graphTokenExpiry; // timestamp when token expires
+
+    if (!tokenExpiry) {
+      dot.className = 'status-dot status-dot--error';
+      return;
+    }
+
+    const now = Date.now();
+    const remainingMs = tokenExpiry - now;
+    const fifteenMin = 15 * 60 * 1000;
+
+    if (remainingMs <= 0) {
+      dot.className = 'status-dot status-dot--error';
+      this.showToast('error', 'Graph connection expired', {
+        text: 'Reconnect',
+        onClick: () => this.startGraphAuth()
+      });
+    } else if (remainingMs <= fifteenMin) {
+      dot.className = 'status-dot status-dot--warning';
+      if (!this._graphExpiryWarningShown) {
+        this._graphExpiryWarningShown = true;
+        this.showToast('warning', 'Graph connection expiring — click to reconnect', {
+          text: 'Reconnect',
+          onClick: () => this.startGraphAuth()
+        });
+      }
+    } else {
+      dot.className = 'status-dot status-dot--success';
+      this._graphExpiryWarningShown = false;
+    }
+  }
 }
 
 function formatAiProviderLabel(item) {
@@ -1628,18 +2921,18 @@ function isMobileReaderViewport() {
   return window.innerWidth <= 767;
 }
 
+// setSidebarOpen / closeSidebarOnCompactViewport retained for compatibility.
+// setSidebarOpen manages sidebar-open body class and sidebarToggleBtn aria-expanded.
 function setSidebarOpen(isOpen) {
-  document.body.classList.toggle('sidebar-open', Boolean(isOpen));
-  const toggleBtn = document.getElementById('sidebarToggleBtn');
-  if (toggleBtn) {
-    toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  document.body.classList.toggle('sidebar-open', isOpen);
+  const toggle = document.getElementById('sidebarToggleBtn');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   }
 }
 
 function closeSidebarOnCompactViewport() {
-  if (isCompactViewport()) {
-    setSidebarOpen(false);
-  }
+  document.body.classList.remove('drawer-open');
 }
 
 function toggleFilterValue(currentValue, nextValue) {
@@ -1693,12 +2986,23 @@ function applyTagFilter(items, tag) {
   });
 }
 
+function applyTagsFilter(items, tags) {
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return items;
+  }
+  return items.filter((item) => {
+    const itemTags = Array.isArray(item && item.tags) ? item.tags : [];
+    return tags.some((t) => itemTags.includes(t));
+  });
+}
+
 function applyEmailFilters(items, filters) {
   const safeFilters = filters || {};
   const searched = applySearch(items, safeFilters.search);
   const categoryFiltered = applyCategoryFilter(searched, safeFilters.category);
   const stateFiltered = applyStateFilter(categoryFiltered, safeFilters.state);
-  return applyTagFilter(stateFiltered, safeFilters.tag);
+  const tagFiltered = applyTagFilter(stateFiltered, safeFilters.tag);
+  return applyTagsFilter(tagFiltered, safeFilters.tags);
 }
 
 function resolveEmptyStateMessage({ triageError, filters }) {
@@ -1783,15 +3087,6 @@ document.addEventListener('DOMContentLoaded', () => {
   dashboard = new DashboardClient();
   dashboard.connect();
 
-  document.addEventListener('click', (event) => {
-    const toggle = event.target.closest('#sidebarToggleBtn');
-    if (!toggle) {
-      return;
-    }
-    const isOpen = document.body.classList.contains('sidebar-open');
-    setSidebarOpen(!isOpen);
-  });
-
   // Periodically query events if not connected via WebSocket
   setInterval(() => {
     if (!dashboard.isConnected) {
@@ -1816,105 +3111,84 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ── Email filter handlers ──────────────────────────────────────────────────
-  document.querySelectorAll('[data-category]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashboard.emailFilters.category = btn.dataset.category || null;
-      dashboard.renderTriage();
-    });
-  });
+  // ── Drawer toggle ──────────────────────────────────────────────────────────
+  const drawerToggle = document.getElementById('drawerToggle');
+  const drawerOverlay = document.getElementById('drawerOverlay');
 
-  document.querySelectorAll('[data-state]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashboard.emailFilters.state = btn.dataset.state || null;
-      dashboard.renderTriage();
-    });
-  });
-
-  const tagList = document.getElementById('tagList');
-  if (tagList) {
-    tagList.addEventListener('click', (event) => {
-      const target = event.target.closest('[data-tag]');
-      if (!target) {
-        return;
-      }
-      dashboard.emailFilters.tag = toggleFilterValue(dashboard.emailFilters.tag, target.dataset.tag);
-      dashboard.renderTriage();
+  if (drawerToggle) {
+    drawerToggle.addEventListener('click', () => {
+      document.body.classList.toggle('drawer-open');
     });
   }
 
+  if (drawerOverlay) {
+    drawerOverlay.addEventListener('click', () => {
+      document.body.classList.remove('drawer-open');
+    });
+  }
+
+  // ── Email filter handlers ──────────────────────────────────────────────────
+  // Category and state pill click handlers are attached dynamically in updateFilterCounts().
+
   const emailSearch = document.getElementById('emailSearch');
+  const emailSearchClear = document.getElementById('emailSearchClear');
   if (emailSearch) {
     emailSearch.addEventListener('input', (e) => {
       dashboard.emailFilters.search = e.target.value;
+      if (emailSearchClear) {
+        emailSearchClear.hidden = !e.target.value;
+      }
+      dashboard.renderTriage();
+    });
+  }
+  if (emailSearchClear) {
+    emailSearchClear.addEventListener('click', () => {
+      if (emailSearch) {
+        emailSearch.value = '';
+      }
+      dashboard.emailFilters.search = '';
+      emailSearchClear.hidden = true;
       dashboard.renderTriage();
     });
   }
 
   // Settings panel toggle — removed (settings now live in dedicated view)
 
-  // Settings form
-  const settingsForm = document.getElementById('settingsForm');
-  if (settingsForm) {
-    settingsForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      dashboard.saveSettings(new FormData(settingsForm));
+  // Settings save / discard
+  const settingsSaveBtn = document.getElementById('settingsSave');
+  if (settingsSaveBtn) {
+    settingsSaveBtn.addEventListener('click', () => {
+      dashboard.saveSettings();
     });
   }
 
-  // Load current settings into form
+  const settingsDiscardBtn = document.getElementById('settingsDiscard');
+  if (settingsDiscardBtn) {
+    settingsDiscardBtn.addEventListener('click', () => {
+      dashboard.loadSettings();
+    });
+  }
+
+  // Graph status popover toggle
+  const graphStatusBtn = document.getElementById('graphStatusBtn');
+  if (graphStatusBtn) {
+    graphStatusBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dashboard.toggleGraphPopover();
+    });
+  }
+
+  // Load current settings
   dashboard.loadSettings();
 
-  // ── Logs filter handlers ──────────────────────────────────────────────────
-  const logsSearchInput = document.getElementById('logsSearchInput');
-  if (logsSearchInput) {
-    logsSearchInput.addEventListener('input', (e) => {
-      dashboard.logsFilterSearch = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsTypeSelect = document.getElementById('logsTypeSelect');
-  if (logsTypeSelect) {
-    logsTypeSelect.addEventListener('change', (e) => {
-      dashboard.logsFilterType = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsWindowSelect = document.getElementById('logsWindowSelect');
-  if (logsWindowSelect) {
-    logsWindowSelect.addEventListener('change', (e) => {
-      dashboard.logsFilterWindow = e.target.value;
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
-  const logsClearFiltersBtn = document.getElementById('logsClearFiltersBtn');
-  if (logsClearFiltersBtn) {
-    logsClearFiltersBtn.addEventListener('click', () => {
-      dashboard.logsFilterSearch = '';
-      dashboard.logsFilterType = 'all';
-      dashboard.logsFilterWindow = '15m';
-      dashboard.logsExpandedRowId = null;
-      if (logsSearchInput) logsSearchInput.value = '';
-      if (logsTypeSelect) logsTypeSelect.value = 'all';
-      if (logsWindowSelect) logsWindowSelect.value = '15m';
-      dashboard.handleLogsFilterChange();
-    });
-  }
-
+  // ── Logs live toggle handler ───────────────────────────────────────────────
+  // Filter pills, search input, and stat cards are wired dynamically in renderLogs().
   const logsLiveToggle = document.getElementById('logsLiveToggle');
   if (logsLiveToggle) {
     logsLiveToggle.checked = dashboard.logsIsLive;
     logsLiveToggle.addEventListener('change', (e) => {
       dashboard.handleLogsLiveToggle(e.target.checked);
     });
-  }
-
-  const logsLivePausedBadge = document.getElementById('logsLivePausedBadge');
-  if (logsLivePausedBadge) {
-    logsLivePausedBadge.hidden = dashboard.logsIsLive;
   }
 
   // ── Route controller ──────────────────────────────────────────────────────

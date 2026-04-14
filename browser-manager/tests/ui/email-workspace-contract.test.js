@@ -2,15 +2,11 @@ const fs = require('fs');
 const path = require('path');
 
 describe('Email workspace contract', () => {
-  test('index declares filter rail, inbox list, and reader pane regions', () => {
+  test('index declares inbox list and reader pane regions', () => {
     const indexPath = path.join(__dirname, '../../public/index.html');
     const html = fs.readFileSync(indexPath, 'utf8');
 
-    expect(html).toContain('class="email-filter-rail"');
-    expect(html).toContain('data-region="filter-rail"');
-    expect(html).toContain('class="email-inbox-list"');
     expect(html).toContain('data-region="inbox-list"');
-    expect(html).toContain('class="email-reader-pane"');
     expect(html).toContain('data-region="reader-pane"');
   });
 
@@ -119,7 +115,7 @@ describe('Email workspace contract', () => {
     harness.refreshBtn.click();
     await flushMicrotasks();
 
-    const firstRow = harness.triageList.querySelector('.card-collapsed');
+    const firstRow = harness.triageList.querySelector('.email-row');
     expect(firstRow).toBeTruthy();
 
     firstRow.click();
@@ -140,11 +136,11 @@ describe('Email workspace contract', () => {
 
     harness.triageList.scrollTop = 44;
 
-    const firstRow = harness.triageList.querySelector('.card-collapsed');
+    const firstRow = harness.triageList.querySelector('.email-row');
     firstRow.click();
     expect(harness.workspace.classList.contains('is-reader-open')).toBe(true);
 
-    const selectedBefore = harness.triageList.querySelector('.email-card[data-selected="true"]')?.dataset.id;
+    const selectedBefore = harness.triageList.querySelector('.email-row.is-selected')?.dataset.id;
 
     const backBtn = harness.readerPane.querySelector('.mobile-reader-back');
     expect(backBtn).toBeTruthy();
@@ -153,7 +149,7 @@ describe('Email workspace contract', () => {
     expect(harness.workspace.classList.contains('is-reader-open')).toBe(false);
     expect(harness.searchInput.value).toBe('invoice');
     expect(harness.triageList.scrollTop).toBe(44);
-    expect(harness.triageList.querySelector('.email-card[data-selected="true"]')?.dataset.id).toBe(selectedBefore);
+    expect(harness.triageList.querySelector('.email-row.is-selected')?.dataset.id).toBe(selectedBefore);
   });
 });
 
@@ -191,16 +187,17 @@ async function bootstrapEmailWorkspaceApp(viewportWidth) {
     </aside>
 
     <section data-view="email" class="email-workspace">
-      <aside class="email-filter-rail" data-region="filter-rail"></aside>
-      <div class="email-inbox-list" data-region="inbox-list">
+      <div class="email-list-panel" data-region="inbox-list">
         <button type="button" id="triageRefreshBtn">Refresh</button>
         <input id="emailSearch" type="search">
+        <button type="button" id="emailSearchClear" hidden>&times;</button>
+        <div id="categoryPills"></div>
+        <div id="statePills"></div>
         <p id="triageStatus"></p>
-        <ul id="tagList"></ul>
-        <div id="triageList"></div>
+        <div id="triageList" class="email-list"></div>
         <div id="emailEmptyState" hidden></div>
       </div>
-      <section id="readerPane" class="email-reader-pane" data-region="reader-pane"></section>
+      <section id="readerPane" class="reader-pane" data-region="reader-pane"></section>
     </section>
 
     <section data-view="settings" hidden>
